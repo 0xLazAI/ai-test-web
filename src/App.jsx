@@ -297,7 +297,8 @@ const Login = () => {
 
     try {
       const nonce = await fetchNonce(normalizedAddress)
-      const message = `Sign this message to authenticate your wallet address Nonce: ${nonce} Address: ${normalizedAddress}`
+      //Sign this message to authenticate your wallet address \nNonce: a6154976-698d-4b5e-98b4-79ab9e9da96d\nAddress: 0xd4F8bbF9c0B8AFF6D76d2C5Fa4971a36fC9e4003
+      const message = `Sign this message to authenticate your wallet address \nNonce: ${nonce}\nAddress: ${normalizedAddress}`
       const signature = await signMessageAsync({ message })
 
       const payload = {
