@@ -301,7 +301,7 @@ const Login = () => {
 
     try {
       const nonce = await fetchNonce(address)
-      const message = `APIXLab 登录签名\nNonce: ${nonce}`
+      const message = `Sign this message to authenticate your wallet address\nNonce: ${nonce}\nAddress: ${address}`
       const signature = await signMessageAsync({ message })
 
       const payload = {
