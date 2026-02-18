@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
 import './App.css'
 import { BrowserRouter as Router, Routes, Route, NavLink, Link, useParams } from 'react-router-dom'
+import { useAccount, useConnect, useDisconnect, useSignMessage } from 'wagmi'
 
 const LOGIN_ENDPOINT = 'https://api.lazpad.fun/lazai'
 const LOGIN_QUERY = 'mutation login($req: LoginReq!) { login(req: $req) { data { userId token } } } '
 const PROFILE_QUERY = 'query getUserDetail($id: String!) { getUserDetail(id: $id) { data { name } success traceId } } '
+const GET_NONCE_QUERY = 'query getNonce($address: String!) { getNonce(address: $address) { data } } '
 
 const workflows = [
   {
@@ -207,15 +209,19 @@ const WorkflowDetail = () => {
 }
 
 const Login = () => {
-  const [form, setForm] = useState({ ethAddress: '', signature: '', invitedCode: '' })
+  const [invitedCode, setInvitedCode] = useState('')
   const [session, setSession] = useState({ token: null, userId: null })
   const [status, setStatus] = useState({ state: 'idle', message: '' })
   const [profileName, setProfileName] = useState('')
   const [profileStatus, setProfileStatus] = useState({ state: 'idle', message: '' })
 
-  const handleChange = (evt) => {
-    const { name, value } = evt.target
-    setForm((prev) => ({ ...prev, [name]: value }))
+  const { address, isConnected } = useAccount()
+  const { connect, connectors, status: connectStatus, error: connectError, variables: connectVariables } = useConnect()
+  const { disconnect } = useDisconnect()
+  const { signMessageAsync, status: signStatus } = useSignMessage()
+
+  const handleInvitedCodeChange = (evt) => {
+    setInvitedCode(evt.target.value)
   }
 
   const fetchProfile = async (userId, token) => {
@@ -255,26 +261,61 @@ const Login = () => {
     }
   }
 
-  const handleSubmit = async (evt) => {
+  const fetchNonce = async (walletAddress) => {
+    const response = await fetch(LOGIN_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        query: GET_NONCE_QUERY,
+        operationName: 'getNonce',
+        variables: { address: walletAddress }
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error(`获取 nonce 失败：HTTP ${response.status}`)
+    }
+
+    const result = await response.json()
+    const nonce = result?.data?.getNonce?.data
+    if (!nonce) {
+      throw new Error('未从后台获取 nonce')
+    }
+    return nonce
+  }
+
+  const handleWalletLogin = async (evt) => {
     evt.preventDefault()
-    setStatus({ state: 'loading', message: '正在登录…' })
+
+    if (!isConnected || !address) {
+      setStatus({ state: 'error', message: '请先连接钱包。' })
+      return
+    }
+
+    setStatus({ state: 'loading', message: '唤起钱包签名…' })
     setSession({ token: null, userId: null })
     setProfileName('')
     setProfileStatus({ state: 'idle', message: '' })
 
-    const payload = {
-      query: LOGIN_QUERY,
-      operationName: 'login',
-      variables: {
-        req: {
-          ethAddress: form.ethAddress.trim(),
-          signature: form.signature.trim(),
-          invitedCode: form.invitedCode.trim()
+    try {
+      const nonce = await fetchNonce(address)
+      const message = `APIXLab 登录签名\nNonce: ${nonce}`
+      const signature = await signMessageAsync({ message })
+
+      const payload = {
+        query: LOGIN_QUERY,
+        operationName: 'login',
+        variables: {
+          req: {
+            ethAddress: address,
+            signature,
+            invitedCode: invitedCode.trim()
+          }
         }
       }
-    }
 
-    try {
       const response = await fetch(LOGIN_ENDPOINT, {
         method: 'POST',
         headers: {
@@ -284,7 +325,7 @@ const Login = () => {
       })
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
+        throw new Error(`登录失败：HTTP ${response.status}`)
       }
 
       const result = await response.json()
@@ -303,7 +344,6 @@ const Login = () => {
     }
   }
 
-  const disabled = !form.ethAddress || !form.signature
   const canRefreshProfile = Boolean(session.token && session.userId && profileStatus.state !== 'loading')
 
   return (
@@ -311,46 +351,52 @@ const Login = () => {
       <section className="auth-card">
         <div>
           <p className="eyebrow">APIXLab Access</p>
-          <h1>签名登录</h1>
-          <p className="lead">使用以太坊地址 + 签名完成登录，可在成功后获得 token，绑定 Telegram 工作流权限。</p>
+          <h1>钱包签名登录</h1>
+          <p className="lead">连接以太坊钱包，获取 nonce 并一键签名，自动完成登录与权限绑定。</p>
         </div>
 
-        <form className="auth-form" onSubmit={handleSubmit}>
-          <label>
-            <span>Eth Address</span>
-            <input
-              name="ethAddress"
-              value={form.ethAddress}
-              onChange={handleChange}
-              placeholder="0x..."
-              required
-              autoComplete="off"
-            />
-          </label>
+        <div className="wallet-section">
+          <div>
+            <span>当前地址</span>
+            <strong>{address || '未连接'}</strong>
+          </div>
+          <div className="wallet-actions">
+            {!isConnected && connectors.map((connector) => (
+              <button
+                key={connector.id ?? connector.uid ?? connector.name}
+                type="button"
+                className="ghost"
+                onClick={() => connect({ connector })}
+                disabled={connectStatus === 'pending'}
+              >
+                {connectStatus === 'pending' && connectVariables?.connector?.id === connector.id ? '连接中…' : `连接 ${connector.name}`}
+              </button>
+            ))}
+            {!isConnected && connectors.length === 0 && (
+              <span className="wallet-error">未检测到浏览器钱包，请安装 MetaMask 或使用支持的注入钱包。</span>
+            )}
+            {isConnected && (
+              <button type="button" className="ghost" onClick={() => disconnect()}>
+                断开连接
+              </button>
+            )}
+          </div>
+          {connectError && <p className="wallet-error">{connectError.message}</p>}
+        </div>
 
-          <label>
-            <span>Signature</span>
-            <textarea
-              name="signature"
-              value={form.signature}
-              onChange={handleChange}
-              placeholder="0x签名"
-              required
-            />
-          </label>
-
+        <form className="auth-form" onSubmit={handleWalletLogin}>
           <label>
             <span>Invited Code（可选）</span>
             <input
               name="invitedCode"
-              value={form.invitedCode}
-              onChange={handleChange}
+              value={invitedCode}
+              onChange={handleInvitedCodeChange}
               placeholder="邀请码"
             />
           </label>
 
-          <button type="submit" className="primary" disabled={disabled || status.state === 'loading'}>
-            {status.state === 'loading' ? '登录中…' : '登录 APIXLab'}
+          <button type="submit" className="primary" disabled={!isConnected || status.state === 'loading' || signStatus === 'pending'}>
+            {status.state === 'loading' ? '登录中…' : '钱包签名登录'}
           </button>
         </form>
 
@@ -392,11 +438,11 @@ const Login = () => {
         )}
 
         <div className="auth-hint">
-          <p>如何生成签名？</p>
+          <p>使用说明</p>
           <ol>
-            <li>使用钱包（如 Rainbow / MetaMask）对 APIXLab challenge 文本签名。</li>
-            <li>将签名粘贴到上方输入框，提交后即可获得 token。</li>
-            <li>token 用于调用 API 或在 Telegram 中绑定工作流权限。</li>
+            <li>点击「连接钱包」，选择浏览器中的 MetaMask / Rainbow 等注入钱包。</li>
+            <li>填写邀请码（若有），点击「钱包签名登录」，钱包会自动弹窗确认 nonce。</li>
+            <li>签名成功即完成登录，并可复制 token 在 Telegram / API 中使用。</li>
           </ol>
         </div>
       </section>
