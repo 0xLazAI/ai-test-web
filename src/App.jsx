@@ -216,6 +216,7 @@ const Login = () => {
   const [profileStatus, setProfileStatus] = useState({ state: 'idle', message: '' })
 
   const { address, isConnected } = useAccount()
+  const normalizedAddress = address?.toLowerCase() || ''
   const { connect, connectors, status: connectStatus, error: connectError, variables: connectVariables } = useConnect()
   const { disconnect } = useDisconnect()
   const { signMessageAsync, status: signStatus } = useSignMessage()
@@ -289,7 +290,7 @@ const Login = () => {
   const handleWalletLogin = async (evt) => {
     evt.preventDefault()
 
-    if (!isConnected || !address) {
+    if (!isConnected || !normalizedAddress) {
       setStatus({ state: 'error', message: '请先连接钱包。' })
       return
     }
@@ -300,8 +301,8 @@ const Login = () => {
     setProfileStatus({ state: 'idle', message: '' })
 
     try {
-      const nonce = await fetchNonce(address)
-      const message = `Sign this message to authenticate your wallet address Nonce: ${nonce} Address: ${address.toLowerCase()}`
+      const nonce = await fetchNonce(normalizedAddress)
+      const message = `Sign this message to authenticate your wallet address Nonce: ${nonce} Address: ${normalizedAddress}`
       const signature = await signMessageAsync({ message })
 
       const payload = {
@@ -309,7 +310,7 @@ const Login = () => {
         operationName: 'login',
         variables: {
           req: {
-            ethAddress: address.toLowerCase(),
+            ethAddress: normalizedAddress,
             signature,
             invitedCode: invitedCode.trim()
           }
@@ -358,7 +359,7 @@ const Login = () => {
         <div className="wallet-section">
           <div>
             <span>当前地址</span>
-            <strong>{address || '未连接'}</strong>
+            <strong>{normalizedAddress || '未连接'}</strong>
           </div>
           <div className="wallet-actions">
             {!isConnected && connectors.map((connector) => (
