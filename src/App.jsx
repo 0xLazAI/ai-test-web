@@ -209,7 +209,6 @@ const WorkflowDetail = () => {
 }
 
 const Login = () => {
-  const [invitedCode, setInvitedCode] = useState('')
   const [session, setSession] = useState({ token: null, userId: null })
   const [status, setStatus] = useState({ state: 'idle', message: '' })
   const [profileName, setProfileName] = useState('')
@@ -220,10 +219,6 @@ const Login = () => {
   const { connect, connectors, status: connectStatus, error: connectError, variables: connectVariables } = useConnect()
   const { disconnect } = useDisconnect()
   const { signMessageAsync, status: signStatus } = useSignMessage()
-
-  const handleInvitedCodeChange = (evt) => {
-    setInvitedCode(evt.target.value)
-  }
 
   const fetchProfile = async (userId, token) => {
     setProfileStatus({ state: 'loading', message: '拉取用户信息…' })
@@ -312,7 +307,6 @@ const Login = () => {
           req: {
             ethAddress: normalizedAddress,
             signature,
-            invitedCode: invitedCode.trim()
           }
         }
       }
@@ -386,16 +380,6 @@ const Login = () => {
         </div>
 
         <form className="auth-form" onSubmit={handleWalletLogin}>
-          <label>
-            <span>Invited Code（可选）</span>
-            <input
-              name="invitedCode"
-              value={invitedCode}
-              onChange={handleInvitedCodeChange}
-              placeholder="邀请码"
-            />
-          </label>
-
           <button type="submit" className="primary" disabled={!isConnected || status.state === 'loading' || signStatus === 'pending'}>
             {status.state === 'loading' ? '登录中…' : '钱包签名登录'}
           </button>
@@ -442,7 +426,7 @@ const Login = () => {
           <p>使用说明</p>
           <ol>
             <li>点击「连接钱包」，选择浏览器中的 MetaMask / Rainbow 等注入钱包。</li>
-            <li>填写邀请码（若有），点击「钱包签名登录」，钱包会自动弹窗确认 nonce。</li>
+            <li>点击「钱包签名登录」，钱包会自动弹窗确认 nonce。</li>
             <li>签名成功即完成登录，并可复制 token 在 Telegram / API 中使用。</li>
           </ol>
         </div>
