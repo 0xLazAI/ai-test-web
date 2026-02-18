@@ -254,11 +254,16 @@ nav a.active {
   gap: 12px;
   font-size: 0.85rem;
   color: #475569;
+  word-break: break-word;
 }
 
 .workflow-card dt,
 .workflow-card dd {
   margin: 0;
+}
+
+.workflow-card dd {
+  font-weight: 500;
 }
 
 .workflow-card dt {
