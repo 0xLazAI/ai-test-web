@@ -541,3 +541,46 @@ nav a.active {
     display: none;
   }
 }
+
+
+.header-auth {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.header-auth .primary,
+.header-auth .ghost {
+  padding: 8px 16px;
+  font-size: 0.9rem;
+}
+
+.session-actions,
+.connector-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.session-actions .ghost,
+.connector-list .ghost {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
+
+.mini-status {
+  width: 100%;
+  font-size: 0.8rem;
+  margin: 0;
+  color: #475569;
+}
+
+.mini-status.success {
+  color: #059669;
+}
+
+.mini-status.error {
+  color: #dc2626;
+}

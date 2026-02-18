@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import './App.css'
-import { BrowserRouter as Router, Routes, Route, NavLink, Link, useParams } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Link, useParams } from 'react-router-dom'
 import { useAccount, useConnect, useDisconnect, useSignMessage } from 'wagmi'
 
 const LOGIN_ENDPOINT = 'https://api.lazpad.fun/lazai'
@@ -49,11 +49,7 @@ const Layout = ({ children }) => {
             <span className="brand-tagline">Workflow Playground</span>
           </div>
         </Link>
-        <nav>
-          <NavLink to="/" end>主页</NavLink>
-          <NavLink to="/workflows/singularity-studio">奇点工作流</NavLink>
-          <NavLink to="/login">登录</NavLink>
-        </nav>
+        <HeaderAuthControl />
       </header>
       <main className="page-area">{children}</main>
       <footer className="site-footer">
@@ -76,7 +72,9 @@ const Home = () => {
         </p>
         <div className="hero-actions">
           <Link className="primary" to="/workflows/singularity-studio">查看奇点工作流</Link>
-          <Link className="ghost" to="/login">登录 / 获取权限</Link>
+          <button type="button" className="ghost" onClick={() => document.getElementById('header-auth-control')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
+            立即登录接入
+          </button>
         </div>
       </section>
 
@@ -208,54 +206,31 @@ const WorkflowDetail = () => {
   )
 }
 
-const Login = () => {
-  const [session, setSession] = useState({ token: null, userId: null })
+
+const SESSION_KEY = 'apixlab_session'
+const INITIAL_SESSION = { token: null, userId: null, profileName: '' }
+
+const HeaderAuthControl = () => {
+  const [session, setSession] = useState(() => {
+    try {
+      const stored = localStorage.getItem(SESSION_KEY)
+      return stored ? { ...INITIAL_SESSION, ...JSON.parse(stored) } : INITIAL_SESSION
+    } catch {
+      return INITIAL_SESSION
+    }
+  })
   const [status, setStatus] = useState({ state: 'idle', message: '' })
-  const [profileName, setProfileName] = useState('')
-  const [profileStatus, setProfileStatus] = useState({ state: 'idle', message: '' })
 
   const { address, isConnected } = useAccount()
-  const normalizedAddress = address?.toLowerCase() || ''
   const { connect, connectors, status: connectStatus, error: connectError, variables: connectVariables } = useConnect()
   const { disconnect } = useDisconnect()
   const { signMessageAsync, status: signStatus } = useSignMessage()
 
-  const fetchProfile = async (userId, token) => {
-    setProfileStatus({ state: 'loading', message: '拉取用户信息…' })
-    setProfileName('')
+  const normalizedAddress = address?.toLowerCase() || ''
 
-    try {
-      const response = await fetch(LOGIN_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          query: PROFILE_QUERY,
-          operationName: 'getUserDetail',
-          variables: { id: String(userId) }
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-
-      const result = await response.json()
-      const detail = result?.data?.getUserDetail?.data
-
-      if (detail?.name) {
-        setProfileName(detail.name)
-        setProfileStatus({ state: 'success', message: '已获取用户信息。' })
-      } else {
-        const firstError = result?.errors?.[0]?.message || '未返回用户信息。'
-        setProfileStatus({ state: 'error', message: firstError })
-      }
-    } catch (error) {
-      setProfileStatus({ state: 'error', message: error.message })
-    }
-  }
+  useEffect(() => {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session))
+  }, [session])
 
   const fetchNonce = async (walletAddress) => {
     const response = await fetch(LOGIN_ENDPOINT, {
@@ -282,19 +257,58 @@ const Login = () => {
     return nonce
   }
 
-  const handleWalletLogin = async (evt) => {
-    evt.preventDefault()
+  const fetchProfile = async (userId, token, silent = false) => {
+    if (!silent) {
+      setStatus({ state: 'loading', message: '拉取用户信息…' })
+    }
 
+    try {
+      const response = await fetch(LOGIN_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          query: PROFILE_QUERY,
+          operationName: 'getUserDetail',
+          variables: { id: String(userId) }
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      const result = await response.json()
+      const detail = result?.data?.getUserDetail?.data
+
+      if (detail?.name) {
+        setSession(prev => ({ ...prev, profileName: detail.name, token, userId }))
+        setStatus({ state: 'success', message: '登录完成，可调用工作流。' })
+      } else {
+        const firstError = result?.errors?.[0]?.message || '未返回用户信息。'
+        setStatus({ state: 'error', message: firstError })
+      }
+    } catch (error) {
+      setStatus({ state: 'error', message: error.message || '拉取用户信息失败。' })
+    }
+  }
+
+  useEffect(() => {
+    if (session.token && session.userId && !session.profileName) {
+      fetchProfile(session.userId, session.token, true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.token, session.userId])
+
+  const handleLoginFlow = async () => {
     if (!isConnected || !normalizedAddress) {
       setStatus({ state: 'error', message: '请先连接钱包。' })
       return
     }
 
     setStatus({ state: 'loading', message: '唤起钱包签名…' })
-    setSession({ token: null, userId: null })
-    setProfileName('')
-    setProfileStatus({ state: 'idle', message: '' })
-
     try {
       const nonce = await fetchNonce(normalizedAddress)
       //Sign this message to authenticate your wallet address \nNonce: a6154976-698d-4b5e-98b4-79ab9e9da96d\nAddress: 0xd4F8bbF9c0B8AFF6D76d2C5Fa4971a36fC9e4003
@@ -307,7 +321,7 @@ const Login = () => {
         variables: {
           req: {
             ethAddress: normalizedAddress,
-            signature,
+            signature
           }
         }
       }
@@ -328,114 +342,102 @@ const Login = () => {
       const loginData = result?.data?.login?.data
 
       if (loginData?.token && loginData?.userId) {
-        setStatus({ state: 'success', message: '登录成功。token 可用于后续接口调用。' })
-        setSession({ token: loginData.token, userId: loginData.userId })
-        fetchProfile(loginData.userId, loginData.token)
+        setSession({ token: loginData.token, userId: loginData.userId, profileName: '' })
+        await fetchProfile(loginData.userId, loginData.token)
       } else {
         const firstError = result?.errors?.[0]?.message || '未返回 token，请检查签名是否有效。'
         setStatus({ state: 'error', message: firstError })
       }
     } catch (error) {
-      setStatus({ state: 'error', message: error.message || '登录失败，请稍后再试。' })
+      const message = error?.message === 'User rejected the request.' ? '你取消了签名，请重试。' : (error.message || '登录失败，请稍后再试。')
+      setStatus({ state: 'error', message })
     }
   }
 
-  const canRefreshProfile = Boolean(session.token && session.userId && profileStatus.state !== 'loading')
+  const handlePrimaryClick = () => {
+    if (!isConnected) {
+      const defaultConnector = connectors[0]
+      if (!defaultConnector) {
+        setStatus({ state: 'error', message: '未检测到浏览器钱包，请先安装。' })
+        return
+      }
+      connect({ connector: defaultConnector })
+      return
+    }
+
+    if (!session.token) {
+      handleLoginFlow()
+      return
+    }
+  }
+
+  const handleCopyToken = async () => {
+    if (!session.token) return
+    try {
+      await navigator.clipboard.writeText(session.token)
+      setStatus({ state: 'success', message: 'Token 已复制到剪贴板。' })
+    } catch (error) {
+      setStatus({ state: 'error', message: '无法复制 token，请手动复制。' })
+    }
+  }
+
+  const handleLogout = () => {
+    setSession(INITIAL_SESSION)
+    setStatus({ state: 'idle', message: '已退出登录。' })
+  }
+
+  const primaryMode = !isConnected ? 'connect' : session.token ? 'profile' : 'login'
+  const buttonLabel = primaryMode === 'connect'
+    ? (connectStatus === 'pending' ? '连接中…' : '连接钱包')
+    : primaryMode === 'login'
+      ? (status.state === 'loading' ? '登录中…' : '登录工作流')
+      : (session.profileName || (normalizedAddress ? `${normalizedAddress.slice(0, 6)}…${normalizedAddress.slice(-4)}` : '已登录'))
 
   return (
-    <div className="auth">
-      <section className="auth-card">
-        <div>
-          <p className="eyebrow">APIXLab Access</p>
-          <h1>钱包签名登录</h1>
-          <p className="lead">连接以太坊钱包，获取 nonce 并一键签名，自动完成登录与权限绑定。</p>
-        </div>
-
-        <div className="wallet-section">
-          <div>
-            <span>当前地址</span>
-            <strong>{normalizedAddress || '未连接'}</strong>
-          </div>
-          <div className="wallet-actions">
-            {!isConnected && connectors.map((connector) => (
-              <button
-                key={connector.id ?? connector.uid ?? connector.name}
-                type="button"
-                className="ghost"
-                onClick={() => connect({ connector })}
-                disabled={connectStatus === 'pending'}
-              >
-                {connectStatus === 'pending' && connectVariables?.connector?.id === connector.id ? '连接中…' : `连接 ${connector.name}`}
-              </button>
-            ))}
-            {!isConnected && connectors.length === 0 && (
-              <span className="wallet-error">未检测到浏览器钱包，请安装 MetaMask 或使用支持的注入钱包。</span>
-            )}
-            {isConnected && (
-              <button type="button" className="ghost" onClick={() => disconnect()}>
-                断开连接
-              </button>
-            )}
-          </div>
-          {connectError && <p className="wallet-error">{connectError.message}</p>}
-        </div>
-
-        <form className="auth-form" onSubmit={handleWalletLogin}>
-          <button type="submit" className="primary" disabled={!isConnected || status.state === 'loading' || signStatus === 'pending'}>
-            {status.state === 'loading' ? '登录中…' : '钱包签名登录'}
+    <div className="header-auth" id="header-auth-control">
+      <button
+        type="button"
+        className="primary"
+        onClick={handlePrimaryClick}
+        disabled={(primaryMode === 'login' && status.state === 'loading') || (primaryMode === 'connect' && connectStatus === 'pending')}
+      >
+        {buttonLabel}
+      </button>
+      {isConnected && (
+        <button type="button" className="ghost" onClick={() => disconnect()}>
+          断开
+        </button>
+      )}
+      {session.token && (
+        <div className="session-actions">
+          <button type="button" className="ghost" onClick={handleCopyToken}>
+            复制 Token
           </button>
-        </form>
-
-        {status.state !== 'idle' && (
-          <div className={`auth-status ${status.state}`}>
-            <p>{status.message}</p>
-            {session.token && (
-              <div className="token-box">
-                <span>Token：</span>
-                <code>{session.token}</code>
-              </div>
-            )}
-          </div>
-        )}
-
-        {session.token && (
-          <div className="profile-panel">
-            <div className="profile-head">
-              <p>用户信息</p>
-              <button
-                className="ghost"
-                type="button"
-                disabled={!canRefreshProfile}
-                onClick={() => fetchProfile(session.userId, session.token)}
-              >
-                刷新
-              </button>
-            </div>
-            <div className={`auth-status ${profileStatus.state}`}>
-              <p>{profileStatus.message || '尚未拉取用户信息。'}</p>
-            </div>
-            {profileName && (
-              <div className="profile-name">
-                <span>姓名 / Name</span>
-                <strong>{profileName}</strong>
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="auth-hint">
-          <p>使用说明</p>
-          <ol>
-            <li>点击「连接钱包」，选择浏览器中的 MetaMask / Rainbow 等注入钱包。</li>
-            <li>点击「钱包签名登录」，钱包会自动弹窗确认 nonce。</li>
-            <li>签名成功即完成登录，并可复制 token 在 Telegram / API 中使用。</li>
-          </ol>
+          <button type="button" className="ghost" onClick={handleLogout}>
+            退出
+          </button>
         </div>
-      </section>
+      )}
+      {!isConnected && connectors.length > 1 && (
+        <div className="connector-list">
+          {connectors.map((connector) => (
+            <button
+              type="button"
+              className="ghost"
+              key={connector.id ?? connector.uid ?? connector.name}
+              onClick={() => connect({ connector })}
+              disabled={connectStatus === 'pending' && connectVariables?.connector?.id === connector.id}
+            >
+              {connectStatus === 'pending' && connectVariables?.connector?.id === connector.id ? '连接中…' : connector.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {connectError && <p className="mini-status error">{connectError.message}</p>}
+      {status.message && <p className={`mini-status ${status.state}`}>{status.message}</p>}
     </div>
   )
 }
-
 const NotFound = () => (
   <div className="detail">
     <h1>404</h1>
@@ -451,7 +453,6 @@ function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/workflows/:workflowId" element={<WorkflowDetail />} />
-          <Route path="/login" element={<Login />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Layout>
