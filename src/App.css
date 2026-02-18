@@ -250,7 +250,7 @@ nav a.active {
 
 .workflow-card dl {
   display: grid;
-  grid-template-columns: 1.5fr 1fr 1fr;
+  grid-template-columns: 2fr 1fr 1fr;
   gap: 12px;
   font-size: 0.85rem;
   color: #475569;
