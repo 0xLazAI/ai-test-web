@@ -371,16 +371,6 @@ const HeaderAuthControl = () => {
     }
   }
 
-  const handleCopyToken = async () => {
-    if (!session.token) return
-    try {
-      await navigator.clipboard.writeText(session.token)
-      setStatus({ state: 'success', message: 'Token 已复制到剪贴板。' })
-    } catch (error) {
-      setStatus({ state: 'error', message: '无法复制 token，请手动复制。' })
-    }
-  }
-
   const handleLogout = () => {
     setSession(INITIAL_SESSION)
     setStatus({ state: 'idle', message: '已退出登录。' })
@@ -410,9 +400,6 @@ const HeaderAuthControl = () => {
       )}
       {session.token && (
         <div className="session-actions">
-          <button type="button" className="ghost" onClick={handleCopyToken}>
-            复制 Token
-          </button>
           <button type="button" className="ghost" onClick={handleLogout}>
             退出
           </button>
