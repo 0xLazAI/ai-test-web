@@ -584,3 +584,24 @@ nav a.active {
 .mini-status.error {
   color: #dc2626;
 }
+
+.workflow-cta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.workflow-cta button {
+  border: 1px solid #0f172a;
+  background: #0f172a;
+  color: white;
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.workflow-cta button:hover {
+  opacity: 0.85;
+}

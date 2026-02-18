@@ -70,12 +70,6 @@ const Home = () => {
           APIXLab 聚焦多智能体内容生产实验。所有工作流都经过实战验证，
           可直接复用到团队 SOP 或作为自建平台的模板。
         </p>
-        <div className="hero-actions">
-          <Link className="primary" to="/workflows/singularity-studio">查看奇点工作流</Link>
-          <button type="button" className="ghost" onClick={() => document.getElementById('header-auth-control')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
-            立即登录接入
-          </button>
-        </div>
       </section>
 
       <section className="workflow-list">
@@ -90,10 +84,15 @@ const Home = () => {
         <div className="workflow-grid">
           {workflows.map((flow) => (
             <article key={flow.id} className="workflow-card">
-              <div>
-                <p className="chip">{flow.status}</p>
-                <h3>{flow.name}</h3>
-                <p className="muted">{flow.description}</p>
+              <div className="workflow-cta">
+                <div>
+                  <p className="chip">{flow.status}</p>
+                  <h3>{flow.name}</h3>
+                  <p className="muted">{flow.description}</p>
+                </div>
+                <button type="button" onClick={() => document.getElementById('header-auth-control')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
+                  查看工作流并接入
+                </button>
               </div>
               <dl>
                 <div>
