@@ -3,6 +3,8 @@ import './App.css'
 import { BrowserRouter as Router, Routes, Route, NavLink, Link, useParams } from 'react-router-dom'
 
 const LOGIN_ENDPOINT = 'https://api.lazpad.fun/lazai'
+const LOGIN_QUERY = 'mutation login($req: LoginReq!) { login(req: $req) { data { userId token } } } '
+const PROFILE_QUERY = 'query getUserDetail($id: String!) { getUserDetail(id: $id) { data { content { avatar invitedByCode nickName } invitedCode ethAddress id invitesCount name scoreInfo { commonScore } tgId xId status inviteScore } success traceId } } '
 
 const workflows = [
   {
@@ -206,19 +208,62 @@ const WorkflowDetail = () => {
 
 const Login = () => {
   const [form, setForm] = useState({ ethAddress: '', signature: '', invitedCode: '' })
-  const [status, setStatus] = useState({ state: 'idle', message: '', token: null })
+  const [session, setSession] = useState({ token: null, userId: null })
+  const [status, setStatus] = useState({ state: 'idle', message: '' })
+  const [profile, setProfile] = useState(null)
+  const [profileStatus, setProfileStatus] = useState({ state: 'idle', message: '' })
 
   const handleChange = (evt) => {
     const { name, value } = evt.target
     setForm((prev) => ({ ...prev, [name]: value }))
   }
 
+  const fetchProfile = async (userId, token) => {
+    setProfileStatus({ state: 'loading', message: '拉取用户信息…' })
+    setProfile(null)
+
+    try {
+      const response = await fetch(LOGIN_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          query: PROFILE_QUERY,
+          operationName: 'getUserDetail',
+          variables: { id: String(userId) }
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      const result = await response.json()
+      const detail = result?.data?.getUserDetail?.data
+
+      if (detail) {
+        setProfile(detail)
+        setProfileStatus({ state: 'success', message: '已获取用户信息。' })
+      } else {
+        const firstError = result?.errors?.[0]?.message || '未返回用户信息。'
+        setProfileStatus({ state: 'error', message: firstError })
+      }
+    } catch (error) {
+      setProfileStatus({ state: 'error', message: error.message })
+    }
+  }
+
   const handleSubmit = async (evt) => {
     evt.preventDefault()
-    setStatus({ state: 'loading', message: '正在登录…', token: null })
+    setStatus({ state: 'loading', message: '正在登录…' })
+    setSession({ token: null, userId: null })
+    setProfile(null)
+    setProfileStatus({ state: 'idle', message: '' })
 
     const payload = {
-      query: 'mutation login($req: LoginReq!) { login(req: $req) { data { userId token } } } ',
+      query: LOGIN_QUERY,
       operationName: 'login',
       variables: {
         req: {
@@ -245,18 +290,21 @@ const Login = () => {
       const result = await response.json()
       const loginData = result?.data?.login?.data
 
-      if (loginData?.token) {
-        setStatus({ state: 'success', message: '登录成功。请复制 token 用于 API 调用。', token: loginData.token })
+      if (loginData?.token && loginData?.userId) {
+        setStatus({ state: 'success', message: '登录成功。token 可用于后续接口调用。' })
+        setSession({ token: loginData.token, userId: loginData.userId })
+        fetchProfile(loginData.userId, loginData.token)
       } else {
         const firstError = result?.errors?.[0]?.message || '未返回 token，请检查签名是否有效。'
-        setStatus({ state: 'error', message: firstError, token: null })
+        setStatus({ state: 'error', message: firstError })
       }
     } catch (error) {
-      setStatus({ state: 'error', message: error.message || '登录失败，请稍后再试。', token: null })
+      setStatus({ state: 'error', message: error.message || '登录失败，请稍后再试。' })
     }
   }
 
   const disabled = !form.ethAddress || !form.signature
+  const canRefreshProfile = Boolean(session.token && session.userId && profileStatus.state !== 'loading')
 
   return (
     <div className="auth">
@@ -309,10 +357,69 @@ const Login = () => {
         {status.state !== 'idle' && (
           <div className={`auth-status ${status.state}`}>
             <p>{status.message}</p>
-            {status.token && (
+            {session.token && (
               <div className="token-box">
                 <span>Token：</span>
-                <code>{status.token}</code>
+                <code>{session.token}</code>
+              </div>
+            )}
+          </div>
+        )}
+
+        {session.token && (
+          <div className="profile-panel">
+            <div className="profile-head">
+              <p>用户信息</p>
+              <button
+                className="ghost"
+                type="button"
+                disabled={!canRefreshProfile}
+                onClick={() => fetchProfile(session.userId, session.token)}
+              >
+                刷新
+              </button>
+            </div>
+            <div className={`auth-status ${profileStatus.state}`}>
+              <p>{profileStatus.message || '尚未拉取用户信息。'}</p>
+            </div>
+            {profile && (
+              <div className="profile-grid">
+                <div>
+                  <span>昵称</span>
+                  <strong>{profile.content?.nickName || profile.name || '—'}</strong>
+                </div>
+                <div>
+                  <span>Eth</span>
+                  <strong>{profile.ethAddress}</strong>
+                </div>
+                <div>
+                  <span>用户 ID</span>
+                  <strong>{profile.id}</strong>
+                </div>
+                <div>
+                  <span>TG ID</span>
+                  <strong>{profile.tgId || '未绑定'}</strong>
+                </div>
+                <div>
+                  <span>邀请人</span>
+                  <strong>{profile.content?.invitedByCode || '—'}</strong>
+                </div>
+                <div>
+                  <span>邀请码</span>
+                  <strong>{profile.invitedCode || '—'}</strong>
+                </div>
+                <div>
+                  <span>邀请数</span>
+                  <strong>{profile.invitesCount ?? 0}</strong>
+                </div>
+                <div>
+                  <span>Common Score</span>
+                  <strong>{profile.scoreInfo?.commonScore ?? 0}</strong>
+                </div>
+                <div>
+                  <span>状态</span>
+                  <strong>{profile.status}</strong>
+                </div>
               </div>
             )}
           </div>
