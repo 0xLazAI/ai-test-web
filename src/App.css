@@ -165,10 +165,20 @@ nav a.active {
   transform: translateY(-2px);
 }
 
+.primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .ghost {
   border: 1px solid #e2e8f0;
   color: #0f172a;
   background: rgba(255, 255, 255, 0.6);
+}
+
+.ghost:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .workflow-list {
@@ -326,12 +336,172 @@ nav a.active {
   font-weight: 500;
 }
 
+.flow-guide {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.flow-guide .guide-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.flow-guide ol,
+.flow-guide ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.auth {
+  display: flex;
+  justify-content: center;
+  padding: 60px 0;
+}
+
+.auth-card {
+  width: min(820px, 100%);
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 32px;
+  padding: 48px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 30px 60px rgba(15, 23, 42, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.auth-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.auth-form input,
+.auth-form textarea {
+  border: 1px solid #d5dbe7;
+  border-radius: 16px;
+  padding: 14px 16px;
+  font-size: 1rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 52px;
+}
+
+.auth-form textarea {
+  min-height: 120px;
+}
+
+.auth-form input:focus,
+.auth-form textarea:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18);
+}
+
+.auth-status {
+  border-radius: 24px;
+  padding: 16px 20px;
+  font-size: 0.95rem;
+}
+
+.auth-status.success {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #bbf7d0;
+}
+
+.auth-status.error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.auth-status.loading {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.token-box {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(15, 23, 42, 0.05);
+  border-radius: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  word-break: break-all;
+}
+
+.profile-panel {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 24px;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.profile-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+}
+
+.profile-name {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+
+.profile-name span {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.profile-name strong {
+  font-size: 1rem;
+}
+
+.auth-hint {
+  background: #f8fafc;
+  border: 1px dashed #cbd5f5;
+  padding: 16px 18px;
+  border-radius: 16px;
+}
+
+.auth-hint ol {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #475569;
+}
+
 @media (max-width: 768px) {
   .workflow-list {
     padding: 24px;
   }
 
-  .detail {
+  .detail,
+  .auth-card {
     padding: 32px 24px;
   }
 
