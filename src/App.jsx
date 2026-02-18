@@ -163,7 +163,7 @@ const WorkflowDetail = () => {
               <p className="channel-title">AI 科技</p>
               <p className="channel-desc">即时获取 AI 热点和实战 SOP</p>
             </div>
-            <a href="https://t.me/+4px6o2YVVBw3ZjQ1" target="_blank" rel="noreferrer">加入频道</a>
+            <a href="https://t.me/+ZBIjbFr989M4Nzk9" target="_blank" rel="noreferrer">加入频道</a>
           </div>
           <div className="channel-item">
             <div>
