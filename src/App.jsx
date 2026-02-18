@@ -155,6 +155,33 @@ const WorkflowDetail = () => {
         ))}
       </div>
 
+      <section className="resources">
+        <h2>频道列表</h2>
+        <div className="channel-list">
+          <div className="channel-item">
+            <div>
+              <p className="channel-title">AI 科技</p>
+              <p className="channel-desc">即时获取 AI 热点和实战 SOP</p>
+            </div>
+            <a href="https://t.me/+4px6o2YVVBw3ZjQ1" target="_blank" rel="noreferrer">加入频道</a>
+          </div>
+          <div className="channel-item">
+            <div>
+              <p className="channel-title">黑暗幻想</p>
+              <p className="channel-desc">黑暗叙事、逻辑对垒与世界观共创</p>
+            </div>
+            <a href="https://t.me/+whfhVny20DAzYWU1" target="_blank" rel="noreferrer">加入频道</a>
+          </div>
+          <div className="channel-item coming-soon">
+            <div>
+              <p className="channel-title">创建新频道</p>
+              <p className="channel-desc">Coming soon —— 支持自定义频道与自动化接入</p>
+            </div>
+            <span>敬请期待</span>
+          </div>
+        </div>
+      </section>
+
       <section className="phases">
         <h2>核心阶段</h2>
         <ol>
@@ -185,14 +212,6 @@ const WorkflowDetail = () => {
               <li>@jimDuelBot —— 逻辑对垒 / Sentinel PK</li>
             </ul>
           </div>
-        </div>
-      </section>
-
-      <section className="resources">
-        <h2>频道列表</h2>
-        <div className="channel-list">
-          <a href="https://t.me/+4px6o2YVVBw3ZjQ1" target="_blank" rel="noreferrer">AI 科技</a>
-          <a href="https://t.me/+whfhVny20DAzYWU1" target="_blank" rel="noreferrer">黑暗幻想</a>
         </div>
       </section>
 
