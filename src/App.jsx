@@ -372,6 +372,7 @@ const HeaderAuthControl = () => {
   }
 
   const handleLogout = () => {
+    disconnect()
     setSession(INITIAL_SESSION)
     setStatus({ state: 'idle', message: '已退出登录。' })
   }
@@ -393,11 +394,6 @@ const HeaderAuthControl = () => {
       >
         {buttonLabel}
       </button>
-      {isConnected && (
-        <button type="button" className="ghost" onClick={() => disconnect()}>
-          断开
-        </button>
-      )}
       {session.token && (
         <div className="session-actions">
           <button type="button" className="ghost" onClick={handleLogout}>
