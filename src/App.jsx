@@ -301,7 +301,7 @@ const Login = () => {
 
     try {
       const nonce = await fetchNonce(address)
-      const message = `Sign this message to authenticate your wallet address \nNonce: ${nonce}\nAddress: ${address}`
+      const message = `Sign this message to authenticate your wallet address Nonce: ${nonce} Address: ${address.toLowerCase()}`
       const signature = await signMessageAsync({ message })
 
       const payload = {
@@ -309,7 +309,7 @@ const Login = () => {
         operationName: 'login',
         variables: {
           req: {
-            ethAddress: address,
+            ethAddress: address.toLowerCase(),
             signature,
             invitedCode: invitedCode.trim()
           }
