@@ -189,6 +189,14 @@ const WorkflowDetail = () => {
       </section>
 
       <section className="resources">
+        <h2>频道列表</h2>
+        <div className="channel-list">
+          <a href="https://t.me/+4px6o2YVVBw3ZjQ1" target="_blank" rel="noreferrer">AI 科技</a>
+          <a href="https://t.me/+whfhVny20DAzYWU1" target="_blank" rel="noreferrer">黑暗幻想</a>
+        </div>
+      </section>
+
+      <section className="resources">
         <h2>相关资源</h2>
         <div className="resource-links">
           {workflow.resources.map((item) => (

@@ -610,3 +610,19 @@ nav a.active {
 .workflow-cta button:hover {
   opacity: 0.85;
 }
+
+.channel-list {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.channel-list a {
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: white;
+  text-decoration: none;
+  font-weight: 500;
+  color: #0f172a;
+}
