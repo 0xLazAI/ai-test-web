@@ -19,8 +19,8 @@ const workflows = [
     lastUpdated: '2026-02-17',
     metrics: [
       { label: '节点', value: '7 个' },
-      { label: '负责人', value: '主编 + Sentinel' },
-      { label: '上线渠道', value: 'Telegram / B站 / Newsletter' }
+      { label: '负责人', value: 'Steven（@mnpemu）、Jim（@jimMao0x1）' },
+      { label: '上线渠道', value: 'Telegram' }
     ],
     phases: [
       '素材雷达：AI 热点 + 原典补库',
