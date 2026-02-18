@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from 'react'
 import './App.css'
-import { BrowserRouter as Router, Routes, Route, Link, useParams } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Link, useParams, useNavigate } from 'react-router-dom'
 import { useAccount, useConnect, useDisconnect, useSignMessage } from 'wagmi'
 
 const LOGIN_ENDPOINT = 'https://api.lazpad.fun/lazai'
@@ -61,6 +61,8 @@ const Layout = ({ children }) => {
 }
 
 const Home = () => {
+  const navigate = useNavigate()
+
   return (
     <div className="home">
       <section className="hero">
@@ -90,7 +92,7 @@ const Home = () => {
                   <h3>{flow.name}</h3>
                   <p className="muted">{flow.description}</p>
                 </div>
-                <button type="button" onClick={() => document.getElementById('header-auth-control')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
+                <button type="button" onClick={() => navigate(`/workflows/${flow.id}`)}>
                   查看工作流并接入
                 </button>
               </div>
