@@ -256,6 +256,11 @@ nav a.active {
   color: #475569;
 }
 
+.workflow-card dt,
+.workflow-card dd {
+  margin: 0;
+}
+
 .workflow-card dt {
   font-weight: 600;
   color: #1e293b;
