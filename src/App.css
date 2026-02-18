@@ -461,13 +461,7 @@ nav a.active {
   font-weight: 600;
 }
 
-.profile-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-}
-
-.profile-grid div {
+.profile-name {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -477,15 +471,15 @@ nav a.active {
   padding: 12px 14px;
 }
 
-.profile-grid span {
+.profile-name span {
   font-size: 0.8rem;
   color: #94a3b8;
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
 
-.profile-grid strong {
-  font-size: 0.95rem;
+.profile-name strong {
+  font-size: 1rem;
 }
 
 .auth-hint {

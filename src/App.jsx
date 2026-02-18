@@ -4,7 +4,7 @@ import { BrowserRouter as Router, Routes, Route, NavLink, Link, useParams } from
 
 const LOGIN_ENDPOINT = 'https://api.lazpad.fun/lazai'
 const LOGIN_QUERY = 'mutation login($req: LoginReq!) { login(req: $req) { data { userId token } } } '
-const PROFILE_QUERY = 'query getUserDetail($id: String!) { getUserDetail(id: $id) { data { content { avatar invitedByCode nickName } invitedCode ethAddress id invitesCount name scoreInfo { commonScore } tgId xId status inviteScore } success traceId } } '
+const PROFILE_QUERY = 'query getUserDetail($id: String!) { getUserDetail(id: $id) { data { name } success traceId } } '
 
 const workflows = [
   {
@@ -210,7 +210,7 @@ const Login = () => {
   const [form, setForm] = useState({ ethAddress: '', signature: '', invitedCode: '' })
   const [session, setSession] = useState({ token: null, userId: null })
   const [status, setStatus] = useState({ state: 'idle', message: '' })
-  const [profile, setProfile] = useState(null)
+  const [profileName, setProfileName] = useState('')
   const [profileStatus, setProfileStatus] = useState({ state: 'idle', message: '' })
 
   const handleChange = (evt) => {
@@ -220,7 +220,7 @@ const Login = () => {
 
   const fetchProfile = async (userId, token) => {
     setProfileStatus({ state: 'loading', message: '拉取用户信息…' })
-    setProfile(null)
+    setProfileName('')
 
     try {
       const response = await fetch(LOGIN_ENDPOINT, {
@@ -243,8 +243,8 @@ const Login = () => {
       const result = await response.json()
       const detail = result?.data?.getUserDetail?.data
 
-      if (detail) {
-        setProfile(detail)
+      if (detail?.name) {
+        setProfileName(detail.name)
         setProfileStatus({ state: 'success', message: '已获取用户信息。' })
       } else {
         const firstError = result?.errors?.[0]?.message || '未返回用户信息。'
@@ -259,7 +259,7 @@ const Login = () => {
     evt.preventDefault()
     setStatus({ state: 'loading', message: '正在登录…' })
     setSession({ token: null, userId: null })
-    setProfile(null)
+    setProfileName('')
     setProfileStatus({ state: 'idle', message: '' })
 
     const payload = {
@@ -382,44 +382,10 @@ const Login = () => {
             <div className={`auth-status ${profileStatus.state}`}>
               <p>{profileStatus.message || '尚未拉取用户信息。'}</p>
             </div>
-            {profile && (
-              <div className="profile-grid">
-                <div>
-                  <span>昵称</span>
-                  <strong>{profile.content?.nickName || profile.name || '—'}</strong>
-                </div>
-                <div>
-                  <span>Eth</span>
-                  <strong>{profile.ethAddress}</strong>
-                </div>
-                <div>
-                  <span>用户 ID</span>
-                  <strong>{profile.id}</strong>
-                </div>
-                <div>
-                  <span>TG ID</span>
-                  <strong>{profile.tgId || '未绑定'}</strong>
-                </div>
-                <div>
-                  <span>邀请人</span>
-                  <strong>{profile.content?.invitedByCode || '—'}</strong>
-                </div>
-                <div>
-                  <span>邀请码</span>
-                  <strong>{profile.invitedCode || '—'}</strong>
-                </div>
-                <div>
-                  <span>邀请数</span>
-                  <strong>{profile.invitesCount ?? 0}</strong>
-                </div>
-                <div>
-                  <span>Common Score</span>
-                  <strong>{profile.scoreInfo?.commonScore ?? 0}</strong>
-                </div>
-                <div>
-                  <span>状态</span>
-                  <strong>{profile.status}</strong>
-                </div>
+            {profileName && (
+              <div className="profile-name">
+                <span>姓名 / Name</span>
+                <strong>{profileName}</strong>
               </div>
             )}
           </div>
