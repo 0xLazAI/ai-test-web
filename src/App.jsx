@@ -108,9 +108,6 @@ const Home = () => {
                   <dd>{flow.lastUpdated}</dd>
                 </div>
               </dl>
-              <Link className="ghost" to={`/workflows/${flow.id}`}>
-                查看详情 →
-              </Link>
             </article>
           ))}
         </div>
