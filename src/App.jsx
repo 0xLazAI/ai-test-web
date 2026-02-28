@@ -409,6 +409,8 @@ const HeaderAuthControl = () => {
       ? (status.state === 'loading' ? '登录中…' : '登录工作流')
       : (session.profileName || (normalizedAddress ? `${normalizedAddress.slice(0, 6)}…${normalizedAddress.slice(-4)}` : '已登录'))
 
+  const showStatusMessage = status.message && status.state !== 'success'
+
   return (
     <div className="header-auth" id="header-auth-control">
       <button
@@ -442,7 +444,7 @@ const HeaderAuthControl = () => {
         </div>
       )}
       {connectError && <p className="mini-status error">{connectError.message}</p>}
-      {status.message && <p className={`mini-status ${status.state}`}>{status.message}</p>}
+      {showStatusMessage && <p className={`mini-status ${status.state}`}>{status.message}</p>}
     </div>
   )
 }
