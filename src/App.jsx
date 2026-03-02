@@ -16,7 +16,7 @@ const workflows = [
     owner: '奇点编辑部',
     status: 'Alpha · 内测',
     cadence: '每日多轮迭代',
-    lastUpdated: '2026-02-17',
+    lastUpdated: new Date().toISOString().slice(0, 10),
     metrics: [
       { label: '节点', value: '7 个' },
       { label: '负责人', value: 'Steven（@mnpemu）、Jim（@jimMao0x1）' },
