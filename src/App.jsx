@@ -78,7 +78,7 @@ const Home = () => {
         <div className="section-head">
           <div>
             <p className="eyebrow">工作流列表</p>
-            <h2>当前可调用的多 Agent 工作流</h2>
+            <h2>当前可调用的工作流</h2>
           </div>
           <span className="count">{workflows.length} 套</span>
         </div>
