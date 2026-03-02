@@ -215,7 +215,7 @@ const WorkflowDetail = () => {
           <div>
             <p className="guide-title">机器人清单</p>
             <ul>
-              <li>@jims_openclaw_test_bot —— 主流程 / SOP 执行</li>
+              <li>SingularityEditor —— 主流程 / SOP 执行</li>
               <li>@jimDuelBot —— 逻辑对垒 / Sentinel PK</li>
             </ul>
           </div>
