@@ -123,10 +123,8 @@ const WorkflowDetail = () => {
   const workflow = workflows.find((flow) => flow.id === workflowId)
 
   const checklist = useMemo(() => [
-    '在 APIXLab 主页提交申请，写明目标 Telegram 群链接/ID',
-    '管理员审批后，将群 ID 写入 OpenClaw 配置并邀请 @jims_openclaw_test_bot',
-    '如需 PK，管理员同步拉入 @jimDuelBot，用户按奇点 SOP 调用',
-    '群内调用时，先在群里 @bot，跟随 SOP 阶段逐步执行'
+    '加入已有频道，直接和群里的 SingularityEditor 等 agent 交互，按预设工作流完成内容输出（新用户享 100 次免费交互）。',
+    '联系管理员 Jim 新建频道：担任主编、搭建知识库，并微调工作流到你期望的产出状态。'
   ], [])
 
   if (!workflow) {
