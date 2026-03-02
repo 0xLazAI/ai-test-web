@@ -11,8 +11,8 @@ const GET_NONCE_QUERY = 'query getNonce($address: String!) { getNonce(address: $
 const workflows = [
   {
     id: 'singularity-studio',
-    name: '奇点编辑部的工作流',
-    description: '端到端内容工作流，覆盖素材采集、逻辑对垒、导演翻译与多渠道分发。',
+    name: '奇点编辑部',
+    description: '多智能体驱动的高质量内容生成与分发引擎。',
     owner: '奇点编辑部',
     status: 'Alpha · 内测',
     cadence: '每日多轮迭代',
