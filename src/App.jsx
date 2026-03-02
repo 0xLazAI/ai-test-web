@@ -172,6 +172,13 @@ const WorkflowDetail = () => {
             </div>
             <a href="https://t.me/+whfhVny20DAzYWU1" target="_blank" rel="noreferrer">加入频道</a>
           </div>
+          <div className="channel-item">
+            <div>
+              <p className="channel-title">METIS / LAZAI 新闻</p>
+              <p className="channel-desc">Metis & LazAI 生态快讯、数据与链上动态</p>
+            </div>
+            <a href="https://t.me/+s0hKNc2LVbYwOTVl" target="_blank" rel="noreferrer">加入频道</a>
+          </div>
           <div className="channel-item coming-soon">
             <div>
               <p className="channel-title">创建新频道</p>
