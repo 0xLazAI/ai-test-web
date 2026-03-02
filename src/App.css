@@ -279,6 +279,10 @@ nav a.active {
   max-width: 960px;
 }
 
+.detail > .primary {
+  margin-top: 24px;
+}
+
 .stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
