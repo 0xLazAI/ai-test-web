@@ -67,7 +67,7 @@ const Home = () => {
     <div className="home">
       <section className="hero">
         <p className="eyebrow">APIXLab · Workflow Catalog</p>
-        <h1>把灵感固化成可复用的<br />API 级工作流</h1>
+        <h1>把灵感固化成可复用的<br />多 Agent 协同工作流</h1>
         <p className="lead">
           APIXLab 聚焦多智能体内容生产实验。所有工作流都经过实战验证，
           可直接复用到团队 SOP 或作为自建平台的模板。
@@ -78,7 +78,7 @@ const Home = () => {
         <div className="section-head">
           <div>
             <p className="eyebrow">工作流列表</p>
-            <h2>当前可调用的 API 工作流</h2>
+            <h2>当前可调用的多 Agent 工作流</h2>
           </div>
           <span className="count">{workflows.length} 套</span>
         </div>
