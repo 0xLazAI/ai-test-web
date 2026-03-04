@@ -250,6 +250,7 @@ const HeaderAuthControl = () => {
     }
   })
   const [status, setStatus] = useState({ state: 'idle', message: '' })
+  const [hasFetchedProfile, setHasFetchedProfile] = useState(false)
 
   const { address, isConnected } = useAccount()
   const { connect, connectors, status: connectStatus, error: connectError, variables: connectVariables } = useConnect()
@@ -326,8 +327,8 @@ const HeaderAuthControl = () => {
   }
 
   useEffect(() => {
-    if (session.token && session.userId && !session.profileName) {
-      fetchProfile(session.userId, session.token, true)
+    if (session.token && session.userId && !hasFetchedProfile) {
+      fetchProfile(session.userId, session.token, true).finally(() => setHasFetchedProfile(true))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.token, session.userId])
@@ -374,6 +375,7 @@ const HeaderAuthControl = () => {
       if (loginData?.token && loginData?.userId) {
         setSession({ token: loginData.token, userId: loginData.userId, profileName: '' })
         await fetchProfile(loginData.userId, loginData.token)
+        setHasFetchedProfile(true)
       } else {
         const firstError = result?.errors?.[0]?.message || '未返回 token，请检查签名是否有效。'
         setStatus({ state: 'error', message: firstError })
@@ -405,6 +407,7 @@ const HeaderAuthControl = () => {
     disconnect()
     setSession(INITIAL_SESSION)
     setStatus({ state: 'idle', message: '已退出登录。' })
+    setHasFetchedProfile(false)
   }
 
   const primaryMode = !isConnected ? 'connect' : session.token ? 'profile' : 'login'
