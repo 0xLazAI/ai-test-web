@@ -495,6 +495,18 @@ nav a.active {
   line-height: 1.6;
 }
 
+.flow-guide .guide-detail-item {
+  margin-bottom: 18px;
+}
+
+.flow-guide .guide-detail-item:last-child {
+  margin-bottom: 0;
+}
+
+.flow-guide .guide-detail-item p {
+  margin: 4px 0;
+}
+
 .api-link-list {
   list-style: none;
   padding-left: 0;
@@ -1097,6 +1109,65 @@ nav a.active {
 .task-title {
   font-weight: 700;
   margin-bottom: 4px;
+}
+
+.review-status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.review-status-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid transparent;
+}
+
+.review-status-chip.default {
+  background: #eef2ff;
+  color: #3730a3;
+  border-color: #c7d2fe;
+}
+
+.review-status-chip.warning {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fdba74;
+}
+
+.review-status-chip.success {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #86efac;
+}
+
+.review-status-chip.danger {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+.review-status-chip.muted {
+  background: #f8fafc;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+.review-status-chip.subtle {
+  opacity: 0.92;
+}
+
+.review-status-time {
+  color: #64748b;
+  font-size: 0.88rem;
+  font-weight: 600;
 }
 
 .task-meta {
