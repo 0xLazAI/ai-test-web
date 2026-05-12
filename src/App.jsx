@@ -364,6 +364,28 @@ function getReviewRequestDetailPath(reviewRequestId, options = {}) {
     : `/me/review-requests/${encodeURIComponent(normalizedReviewRequestId)}`
 }
 
+function looksLikeEthAddress(value) {
+  return /^0x[a-fA-F0-9]{40}$/.test(String(value || '').trim())
+}
+
+function getReviewRequesterWallet(reviewRequest) {
+  const requester = reviewRequest?.requester || {}
+  const explicitWallet = String(requester.ethAddress || '').trim()
+  if (explicitWallet) {
+    return explicitWallet
+  }
+  const nameValue = String(requester.name || '').trim()
+  return looksLikeEthAddress(nameValue) ? nameValue : ''
+}
+
+function getReviewRequesterName(reviewRequest) {
+  const nameValue = String(reviewRequest?.requester?.name || '').trim()
+  if (!nameValue || looksLikeEthAddress(nameValue)) {
+    return ''
+  }
+  return nameValue
+}
+
 function sanitizeDeployConfigRequest(config) {
   if (!config?.request || typeof config.request !== 'object' || Array.isArray(config.request)) {
     return {}
@@ -857,7 +879,11 @@ const ReviewRequestList = ({ reviewRequests, emptyText, actionSlot, detailBasePa
 
   return (
     <div className="task-list">
-      {reviewRequests.map((reviewRequest) => (
+      {reviewRequests.map((reviewRequest) => {
+        const requesterName = getReviewRequesterName(reviewRequest)
+        const requesterWallet = getReviewRequesterWallet(reviewRequest)
+        const requesterPrimary = requesterName || requesterWallet
+        return (
         <article key={reviewRequest.id} className="task-card">
           <div className="task-card-head">
             <div>
@@ -872,12 +898,13 @@ const ReviewRequestList = ({ reviewRequests, emptyText, actionSlot, detailBasePa
             <span className="sub-chip">{formatStatus(reviewRequest.requestType)}</span>
           </div>
           <p className="task-meta">请求上下文 · {buildReviewRequestContext(reviewRequest)}</p>
-          {reviewRequest.requester?.name && (
+          {requesterPrimary && (
             <p className="task-meta">
-              申请人 · {reviewRequest.requester.name}
-              {reviewRequest.requester.id ? ` (${reviewRequest.requester.id})` : ''}
+              申请人 · {requesterPrimary}
+              {reviewRequest.requester?.id ? ` (${reviewRequest.requester.id})` : ''}
             </p>
           )}
+          {requesterName && requesterWallet && <p className="task-meta">申请人钱包 · {requesterWallet}</p>}
           {reviewRequest.reviewer?.name && <p className="task-meta">审核人 · {reviewRequest.reviewer.name}</p>}
           {reviewRequest.summary && <p className="task-meta">申请说明 · {reviewRequest.summary}</p>}
           {reviewRequest.reviewNote && <p className="task-meta">审核备注 · {reviewRequest.reviewNote}</p>}
@@ -889,7 +916,8 @@ const ReviewRequestList = ({ reviewRequests, emptyText, actionSlot, detailBasePa
           </div>
           {actionSlot?.(reviewRequest)}
         </article>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -1596,12 +1624,16 @@ const ReviewRequestDetailContent = ({
   canApproveOrReject,
   backTo,
   backLabel,
+  expectedReviewerLabel,
 }) => {
   const channelPayload = reviewRequest?.requestPayload?.channel || {}
   const deploymentPayload = reviewRequest?.requestPayload?.deployment || {}
   const deploymentRequest = deploymentPayload?.request || {}
   const resultPayload = reviewRequest?.resultPayload || {}
   const secretEnvKeys = Array.isArray(reviewRequest?.secretEnvKeys) ? reviewRequest.secretEnvKeys : []
+  const requesterName = getReviewRequesterName(reviewRequest)
+  const requesterWallet = getReviewRequesterWallet(reviewRequest)
+  const requesterPrimary = requesterName || requesterWallet || '未记录'
 
   return (
     <>
@@ -1627,15 +1659,19 @@ const ReviewRequestDetailContent = ({
           </div>
           <div className="meta-card">
             <p>申请人</p>
-            <strong>{reviewRequest.requester?.name || '未记录'}</strong>
+            <strong>{requesterPrimary}</strong>
           </div>
           <div className="meta-card">
             <p>申请人 ID</p>
             <strong>{reviewRequest.requester?.id || '未记录'}</strong>
           </div>
           <div className="meta-card">
+            <p>申请人钱包</p>
+            <strong>{requesterWallet || '未记录'}</strong>
+          </div>
+          <div className="meta-card">
             <p>审核人</p>
-            <strong>{reviewRequest.reviewer?.name || '未处理'}</strong>
+            <strong>{reviewRequest.reviewer?.name || expectedReviewerLabel || '未处理'}</strong>
           </div>
           <div className="meta-card">
             <p>Workflow</p>
@@ -1854,6 +1890,8 @@ const ReviewRequestDetailPage = () => {
     error,
     refetch,
   } = useReviewRequestDetail(reviewRequestId, token)
+  const subjectRouteId = reviewRequest?.subjectKey || reviewRequest?.subjectId || ''
+  const { channel: subjectChannel } = usePublicChannel(subjectRouteId, token)
   const [actionState, setActionState] = useState({ state: 'idle', message: '' })
 
   if (!token) {
@@ -1866,6 +1904,13 @@ const ReviewRequestDetailPage = () => {
     && reviewRequest.reviewerScope === 'channel_owner'
     && reviewRequest.requester?.id !== session.userId,
   )
+
+  const expectedReviewerLabel = reviewRequest?.reviewer?.name
+    || (reviewRequest?.reviewerScope === 'admin'
+      ? '管理员审核'
+      : reviewRequest?.reviewerScope === 'channel_owner'
+        ? (String(subjectChannel?.owner?.name || '').trim() ? `${String(subjectChannel?.owner?.name || '').trim()}（频道 owner）` : '频道 owner')
+        : '未处理')
 
   const handleDecision = async (decision) => {
     setActionState({ state: 'loading', message: decision === 'approve' ? '正在通过审核…' : '正在驳回审核…' })
@@ -1920,6 +1965,7 @@ const ReviewRequestDetailPage = () => {
         canApproveOrReject={canApproveOrReject}
         backTo="/me/review-requests"
         backLabel="返回我的审核"
+        expectedReviewerLabel={expectedReviewerLabel}
       />
     </div>
   )
@@ -3147,7 +3193,16 @@ const AdminReviewRequestDetail = () => {
     error,
     refetch,
   } = useReviewRequestDetail(reviewRequestId, token)
+  const subjectRouteId = reviewRequest?.subjectKey || reviewRequest?.subjectId || ''
+  const { channel: subjectChannel } = usePublicChannel(subjectRouteId, token)
   const [actionState, setActionState] = useState({ state: 'idle', message: '' })
+
+  const expectedReviewerLabel = reviewRequest?.reviewer?.name
+    || (reviewRequest?.reviewerScope === 'admin'
+      ? '管理员审核'
+      : reviewRequest?.reviewerScope === 'channel_owner'
+        ? (String(subjectChannel?.owner?.name || '').trim() ? `${String(subjectChannel?.owner?.name || '').trim()}（频道 owner）` : '频道 owner')
+        : '未处理')
 
   if (!token) {
     return (
@@ -3217,6 +3272,7 @@ const AdminReviewRequestDetail = () => {
         canApproveOrReject={reviewRequest.status === 'pending'}
         backTo="/admin/review-requests"
         backLabel="返回审核后台"
+        expectedReviewerLabel={expectedReviewerLabel}
       />
     </div>
   )
