@@ -43,7 +43,7 @@ const SINGULARITY_USAGE_STEPS = [
   '等待首发部署完成。首次冷启动会执行 clawchef cook、workspace 初始化和 gateway 启动，所以通常比后续重部署更久。',
   '部署成功后进入“我的频道”，先确认运行状态、健康状态、公开入口和最近任务都已经正常。',
   '如果只改了配置，直接在频道里修改部署配置即可；如果要强制重建 Pod 但保留 PVC，使用“深度重新部署”。',
-  '删除频道会同时删除实例、PVC 和频道记录，只适合彻底废弃整套环境时使用。',
+  '删除频道会清理实例并归档频道，部署配置、审核记录和任务历史会保留。',
 ]
 const SINGULARITY_BOT_USAGE = [
   '群里至少拉入主编 Bot、审核 Bot、视频生成 Bot。',
@@ -409,6 +409,22 @@ function getChannelJoinActionState(channel, token = '') {
         kind: 'pending',
         label: '审核中',
         helper: '加入申请已经提交，等待频道 owner 审核。',
+      }
+    }
+    if (access.canViewInvite) {
+      const joinUrl = getChannelPrimaryActionUrl(channel)
+      if (joinUrl) {
+        return {
+          kind: 'link',
+          label: getChannelLinkLabel(channel),
+          helper: '',
+          href: joinUrl,
+        }
+      }
+      return {
+        kind: 'approved',
+        label: '已获授权',
+        helper: '你已经有权限查看频道入口；如果入口还没出现，请稍后刷新。',
       }
     }
     if (access.currentUserJoinStatus === 'approved') {
@@ -2828,7 +2844,7 @@ const MyChannelDetail = ({ channelId }) => {
       return
     }
 
-    const confirmed = window.confirm(`确认删除频道「${channel.name}」？这个操作会删除实例和频道数据，不能恢复。`)
+    const confirmed = window.confirm(`确认删除频道「${channel.name}」？这个操作会删除实例并归档频道，审核和历史记录会保留。`)
     if (!confirmed) {
       return
     }
@@ -2980,7 +2996,7 @@ const MyChannelDetail = ({ channelId }) => {
             <div className="action-field action-field-danger">
               <div>
                 <p className="action-label">删除频道</p>
-                <p className="action-copy">删除实例和频道记录。这个操作不可恢复。</p>
+                <p className="action-copy">删除实例并归档频道。部署配置、审核记录和任务历史会保留。</p>
               </div>
               <button type="button" className="ghost danger" onClick={handleDestroyChannel} disabled={isOperationLocked}>
                 删除频道
