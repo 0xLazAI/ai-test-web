@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { BrowserRouter as Router, Routes, Route, Link, NavLink, useLocation, useParams, useNavigate } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Link, NavLink, useLocation, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAccount, useConnect, useDisconnect, useSignMessage } from 'wagmi'
 import { useQuery } from '@tanstack/react-query'
 
@@ -45,6 +45,7 @@ const STATUS_LABELS = {
   channel_join: '加入频道',
   channel_owner: '频道 Owner 审核',
   closed: '已关闭',
+  created: '已创建',
   degraded: '降级',
   deleted: '已删除',
   deleting: '删除中',
@@ -73,6 +74,7 @@ const STATUS_LABELS = {
   retry_waiting: '等待重试',
   review: '需审核',
   running: '运行中',
+  apply_started: '开始落地',
   stopped: '已停止',
   succeeded: '成功',
   telegram: 'Telegram',
@@ -226,25 +228,35 @@ function resolveChannelRouteId(channel) {
   return channel.slug || channel.id
 }
 
-function getChannelLinkLabel(channel) {
-  return getChannelTelegramUrl(channel) ? '加入频道' : ''
+function getChannelLinkLabel(channel, options = {}) {
+  if (!getChannelTelegramUrl(channel, options)) {
+    return ''
+  }
+  const access = getChannelInviteAccess(channel)
+  if (channel?.applicationMode === 'review' && access.canViewInvite && access.currentUserJoinStatus !== 'approved') {
+    return '查看频道入口'
+  }
+  return '加入频道'
 }
 
 function getChannelDeploymentMode(channel) {
   return channel?.deploymentMode || channel?.runtime?.deploymentMode || ''
 }
 
-function getChannelTgGroupId(channel) {
-  return channel?.tgGroupId || channel?.runtime?.tgGroupId || ''
+function getChannelTgGroupId(channel, options = {}) {
+  if (channel?.tgGroupId) {
+    return channel.tgGroupId
+  }
+  return options.allowRuntimeFallback ? (channel?.runtime?.tgGroupId || '') : ''
 }
 
-function getChannelTelegramUrl(channel) {
+function getChannelTelegramUrl(channel, options = {}) {
   const publicUrl = String(channel?.publicUrl || '').trim()
   if (publicUrl && /(^https?:\/\/)?(t\.me|telegram\.me)\//i.test(publicUrl)) {
     return publicUrl
   }
 
-  const tgGroupId = String(getChannelTgGroupId(channel) || '').trim().replace(/^telegram:/i, '')
+  const tgGroupId = String(getChannelTgGroupId(channel, options) || '').trim().replace(/^telegram:/i, '')
   if (!tgGroupId) {
     return ''
   }
@@ -258,8 +270,8 @@ function getChannelTelegramUrl(channel) {
   return normalized ? `https://t.me/c/${normalized}/1` : ''
 }
 
-function getChannelPrimaryActionUrl(channel) {
-  return getChannelTelegramUrl(channel)
+function getChannelPrimaryActionUrl(channel, options = {}) {
+  return getChannelTelegramUrl(channel, options)
 }
 
 function getChannelInviteAccess(channel) {
@@ -340,6 +352,16 @@ function buildReviewRequestContext(reviewRequest) {
     reviewRequest?.subjectKey || reviewRequest?.subjectId || '',
   ].filter(Boolean)
   return parts.join(' · ') || '审核请求'
+}
+
+function getReviewRequestDetailPath(reviewRequestId, options = {}) {
+  const normalizedReviewRequestId = String(reviewRequestId || '').trim()
+  if (!normalizedReviewRequestId) {
+    return options.admin ? '/admin/review-requests' : '/me/review-requests'
+  }
+  return options.admin
+    ? `/admin/review-requests/${encodeURIComponent(normalizedReviewRequestId)}`
+    : `/me/review-requests/${encodeURIComponent(normalizedReviewRequestId)}`
 }
 
 function sanitizeDeployConfigRequest(config) {
@@ -582,6 +604,65 @@ function useMyReviewRequests(token, filters = {}) {
   }
 }
 
+function useAssignedReviewRequests(token, filters = {}) {
+  const requestType = String(filters.requestType || '').trim()
+  const status = String(filters.status || '').trim()
+  const query = useQuery({
+    queryKey: ['assigned-review-requests', token, requestType, status],
+    enabled: Boolean(token),
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const params = new URLSearchParams()
+      if (requestType) {
+        params.set('requestType', requestType)
+      }
+      if (status) {
+        params.set('status', status)
+      }
+      const suffix = params.toString() ? `?${params.toString()}` : ''
+      try {
+        const result = await requestApi(`/v1/me/review-requests/assigned${suffix}`, {}, token)
+        return Array.isArray(result?.reviewRequests) ? result.reviewRequests : []
+      } catch (error) {
+        if (isMissingEndpointError(error)) {
+          return []
+        }
+        throw error
+      }
+    },
+  })
+
+  return {
+    reviewRequests: query.data || [],
+    isLoading: Boolean(token) && query.isLoading,
+    error: query.error?.message || '',
+    refetch: query.refetch,
+  }
+}
+
+function useReviewRequestDetail(reviewRequestId, token) {
+  const query = useQuery({
+    queryKey: ['review-request-detail', reviewRequestId, token],
+    enabled: Boolean(reviewRequestId && token),
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const result = await requestApi(`/v1/review-requests/${encodeURIComponent(reviewRequestId)}`, {}, token)
+      return {
+        reviewRequest: result?.reviewRequest || null,
+        events: Array.isArray(result?.events) ? result.events : [],
+      }
+    },
+  })
+
+  return {
+    reviewRequest: query.data?.reviewRequest || null,
+    events: query.data?.events || [],
+    isLoading: Boolean(reviewRequestId && token) && query.isLoading,
+    error: query.error?.message || '',
+    refetch: query.refetch,
+  }
+}
+
 function useManagedChannelJoinRequests(channelId, token, status = 'pending') {
   const query = useQuery({
     queryKey: ['managed-channel-join-requests', channelId, token, status],
@@ -671,7 +752,8 @@ function useAdminReviewRequests(token, filters = {}) {
 const ChannelAccessAction = ({ channel, token, onActionComplete, showHelper = false }) => {
   const navigate = useNavigate()
   const action = getChannelJoinActionState(channel, token)
-  const [state, setState] = useState({ kind: 'idle', message: '' })
+  const access = getChannelInviteAccess(channel)
+  const [state, setState] = useState({ kind: 'idle', message: '', reviewRequestId: '' })
 
   const focusLogin = () => {
     const loginAnchor = document.getElementById('header-auth-control')
@@ -702,11 +784,12 @@ const ChannelAccessAction = ({ channel, token, onActionComplete, showHelper = fa
       )
       setState({
         kind: 'success',
-        message: `已提交加入申请 ${result?.application?.id || ''}，等待频道 owner 审核。`,
+        message: '已提交加入申请，等待频道 owner 审核。',
+        reviewRequestId: String(result?.application?.id || '').trim(),
       })
       await onActionComplete?.()
     } catch (error) {
-      setState({ kind: 'error', message: error.message || '提交加入申请失败。' })
+      setState({ kind: 'error', message: error.message || '提交加入申请失败。', reviewRequestId: '' })
     }
   }
 
@@ -742,20 +825,32 @@ const ChannelAccessAction = ({ channel, token, onActionComplete, showHelper = fa
     )
   }
 
+  const reviewRequestId = state.reviewRequestId || access.currentReviewRequestId || ''
+  const reviewProgressHref = reviewRequestId
+    ? getReviewRequestDetailPath(reviewRequestId)
+    : '/me/review-requests'
   const helperMessage = state.message || (showHelper ? action.helper : '')
   return (
     <div className="channel-access-action">
-      {control}
+      <div className="channel-access-controls">
+        {control}
+        {(action.kind === 'pending' || state.kind === 'success' || state.kind === 'error') && (
+          <Link to={reviewProgressHref} className="channel-access-secondary">
+            查看审批进度
+          </Link>
+        )}
+      </div>
       {!!helperMessage && (
         <p className={`channel-access-note ${state.kind === 'error' ? 'error' : state.kind === 'success' ? 'success' : ''}`}>
           {helperMessage}
+          {reviewRequestId ? ` 申请单：${reviewRequestId}` : ''}
         </p>
       )}
     </div>
   )
 }
 
-const ReviewRequestList = ({ reviewRequests, emptyText, actionSlot }) => {
+const ReviewRequestList = ({ reviewRequests, emptyText, actionSlot, detailBasePath = '/me/review-requests' }) => {
   if (!reviewRequests.length) {
     return <p className="panel-state">{emptyText}</p>
   }
@@ -777,9 +872,21 @@ const ReviewRequestList = ({ reviewRequests, emptyText, actionSlot }) => {
             <span className="sub-chip">{formatStatus(reviewRequest.requestType)}</span>
           </div>
           <p className="task-meta">请求上下文 · {buildReviewRequestContext(reviewRequest)}</p>
+          {reviewRequest.requester?.name && (
+            <p className="task-meta">
+              申请人 · {reviewRequest.requester.name}
+              {reviewRequest.requester.id ? ` (${reviewRequest.requester.id})` : ''}
+            </p>
+          )}
+          {reviewRequest.reviewer?.name && <p className="task-meta">审核人 · {reviewRequest.reviewer.name}</p>}
           {reviewRequest.summary && <p className="task-meta">申请说明 · {reviewRequest.summary}</p>}
           {reviewRequest.reviewNote && <p className="task-meta">审核备注 · {reviewRequest.reviewNote}</p>}
           {reviewRequest.applyError && <p className="task-error">{reviewRequest.applyError}</p>}
+          <div className="task-card-actions">
+            <Link to={`${detailBasePath}/${encodeURIComponent(reviewRequest.id)}`} className="ghost">
+              查看审核详情
+            </Link>
+          </div>
           {actionSlot?.(reviewRequest)}
         </article>
       ))}
@@ -884,6 +991,9 @@ const Layout = ({ children }) => {
             </NavLink>
             <NavLink to="/me/channels">
               我的频道
+            </NavLink>
+            <NavLink to="/me/review-requests">
+              我的审核
             </NavLink>
             <NavLink to={adminSession.token ? '/admin/review-requests' : '/admin/login'}>
               {adminSession.token ? '审核后台' : '管理员登录'}
@@ -1325,7 +1435,7 @@ const MyChannels = () => {
       { label: '我的频道', value: `${channels.length} 个` },
       { label: '运行中', value: `${channels.filter((channel) => channel.lifecycleStatus === 'running').length} 个` },
       { label: '自动部署', value: `${channels.filter((channel) => getChannelDeploymentMode(channel) === 'auto').length} 个` },
-      { label: '已接入 TG', value: `${channels.filter((channel) => Boolean(getChannelTgGroupId(channel))).length} 个` },
+      { label: '已接入 TG', value: `${channels.filter((channel) => Boolean(getChannelTgGroupId(channel, { allowRuntimeFallback: true }))).length} 个` },
       { label: '待审核请求', value: `${reviewRequests.filter((reviewRequest) => reviewRequest.status === 'pending').length} 条` },
     ]
   }, [channels, reviewRequests])
@@ -1372,11 +1482,14 @@ const MyChannels = () => {
         ))}
       </div>
 
-      <section className="resources">
+      <section className="resources" id="my-review-requests">
         <div className="section-head section-head-tight">
           <div>
             <h2>我的审核请求</h2>
             <p className="section-copy">创建频道并部署、申请加入频道，都会先沉淀到审核请求里。</p>
+          </div>
+          <div className="inline-actions">
+            <Link to="/me/review-requests">进入审核列表</Link>
           </div>
         </div>
         {reviewActionState.message && <p className={`auth-status ${reviewActionState.state}`}>{reviewActionState.message}</p>}
@@ -1386,10 +1499,11 @@ const MyChannels = () => {
           <ReviewRequestList
             reviewRequests={reviewRequests}
             emptyText="当前还没有提交过审核请求。"
+            detailBasePath="/me/review-requests"
             actionSlot={(reviewRequest) => (
               <div className="task-card-actions">
                 {reviewRequest.resultPayload?.channelId && (
-                  <Link to={`/me/channels/${reviewRequest.resultPayload.channelId}`}>查看频道</Link>
+                  <Link to={`/me/channels/${reviewRequest.resultPayload.channelId}`} className="ghost">查看频道</Link>
                 )}
                 {reviewRequest.status === 'pending' && (
                   <button type="button" className="ghost" onClick={() => handleCancelReviewRequest(reviewRequest.id)}>
@@ -1433,9 +1547,9 @@ const MyChannels = () => {
                 <div className="channel-actions">
                   <Link to={`/me/channels/${channel.id}`}>维护频道</Link>
                   <Link to={`/channels/${resolveChannelRouteId(channel)}`}>公开详情</Link>
-                  {getChannelPrimaryActionUrl(channel) && (
-                    <a href={getChannelPrimaryActionUrl(channel)} target="_blank" rel="noreferrer">
-                      {getChannelLinkLabel(channel)}
+                  {getChannelPrimaryActionUrl(channel, { allowRuntimeFallback: true }) && (
+                    <a href={getChannelPrimaryActionUrl(channel, { allowRuntimeFallback: true })} target="_blank" rel="noreferrer">
+                      {getChannelLinkLabel(channel, { allowRuntimeFallback: true })}
                     </a>
                   )}
                 </div>
@@ -1444,6 +1558,369 @@ const MyChannels = () => {
           </div>
         )}
       </section>
+    </div>
+  )
+}
+
+const ReviewRequestTimeline = ({ events }) => {
+  if (!Array.isArray(events) || events.length === 0) {
+    return <p className="panel-state">当前还没有审核事件记录。</p>
+  }
+
+  return (
+    <div className="review-timeline">
+      {events.map((event) => (
+        <article key={event.id} className="timeline-item">
+          <div className="timeline-dot" aria-hidden="true" />
+          <div className="timeline-body">
+            <div className="timeline-head">
+              <strong>{formatStatus(event.eventType)}</strong>
+              <span>{formatDate(event.createdAt)}</span>
+            </div>
+            {event.actor?.name && <p className="task-meta">操作人 · {event.actor.name}</p>}
+            {event.payload && Object.keys(event.payload).length > 0 && (
+              <pre className="json-block review-json-block">{JSON.stringify(event.payload, null, 2)}</pre>
+            )}
+          </div>
+        </article>
+      ))}
+    </div>
+  )
+}
+
+const ReviewRequestDetailContent = ({
+  reviewRequest,
+  events,
+  actionState,
+  onDecision,
+  canApproveOrReject,
+  backTo,
+  backLabel,
+}) => {
+  const channelPayload = reviewRequest?.requestPayload?.channel || {}
+  const deploymentPayload = reviewRequest?.requestPayload?.deployment || {}
+  const deploymentRequest = deploymentPayload?.request || {}
+  const resultPayload = reviewRequest?.resultPayload || {}
+  const secretEnvKeys = Array.isArray(reviewRequest?.secretEnvKeys) ? reviewRequest.secretEnvKeys : []
+
+  return (
+    <>
+      <section className="resources resource-panel">
+        <div className="section-head section-head-tight">
+          <div>
+            <h2>审核摘要</h2>
+            <p className="section-copy">这里会展示申请人、当前状态、审核备注以及最终落地结果。</p>
+          </div>
+          <div className="inline-actions">
+            <Link to={backTo}>{backLabel}</Link>
+          </div>
+        </div>
+        {!!actionState.message && <p className={`auth-status ${actionState.state}`}>{actionState.message}</p>}
+        <div className="meta-grid">
+          <div className="meta-card">
+            <p>审核类型</p>
+            <strong>{formatStatus(reviewRequest.requestType)}</strong>
+          </div>
+          <div className="meta-card">
+            <p>当前状态</p>
+            <strong>{formatStatus(reviewRequest.status)}{reviewRequest.applyStatus && reviewRequest.applyStatus !== 'none' ? ` · ${formatStatus(reviewRequest.applyStatus)}` : ''}</strong>
+          </div>
+          <div className="meta-card">
+            <p>申请人</p>
+            <strong>{reviewRequest.requester?.name || '未记录'}</strong>
+          </div>
+          <div className="meta-card">
+            <p>申请人 ID</p>
+            <strong>{reviewRequest.requester?.id || '未记录'}</strong>
+          </div>
+          <div className="meta-card">
+            <p>审核人</p>
+            <strong>{reviewRequest.reviewer?.name || '未处理'}</strong>
+          </div>
+          <div className="meta-card">
+            <p>Workflow</p>
+            <strong>{reviewRequest.workflowId || '未配置'}</strong>
+          </div>
+          <div className="meta-card">
+            <p>关联资源</p>
+            <strong>{reviewRequest.subjectKey || reviewRequest.subjectId || '未配置'}</strong>
+          </div>
+          <div className="meta-card">
+            <p>创建时间</p>
+            <strong>{formatDate(reviewRequest.createdAt)}</strong>
+          </div>
+          <div className="meta-card">
+            <p>审核时间</p>
+            <strong>{formatDate(reviewRequest.reviewedAt)}</strong>
+          </div>
+          <div className="meta-card">
+            <p>落地时间</p>
+            <strong>{formatDate(reviewRequest.appliedAt)}</strong>
+          </div>
+        </div>
+        {reviewRequest.summary && <p className="task-meta">申请说明 · {reviewRequest.summary}</p>}
+        {reviewRequest.reviewNote && <p className="task-meta">审核备注 · {reviewRequest.reviewNote}</p>}
+        {reviewRequest.applyError && <p className="task-error">{reviewRequest.applyError}</p>}
+        {canApproveOrReject && reviewRequest.status === 'pending' && (
+          <div className="task-card-actions">
+            <button type="button" className="ghost" onClick={() => onDecision('approve')}>
+              通过
+            </button>
+            <button type="button" className="ghost danger" onClick={() => onDecision('reject')}>
+              驳回
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="resources resource-panel">
+        <h2>请求内容</h2>
+        <div className="meta-grid compact-meta-grid">
+          <div className="meta-card">
+            <p>频道名称</p>
+            <strong>{channelPayload.name || reviewRequest.title || '未配置'}</strong>
+          </div>
+          <div className="meta-card">
+            <p>频道 Slug</p>
+            <strong>{channelPayload.slug || reviewRequest.subjectKey || '未配置'}</strong>
+          </div>
+          <div className="meta-card">
+            <p>可见性 / 加入策略</p>
+            <strong>{formatStatus(channelPayload.visibility)} / {formatStatus(channelPayload.applicationMode)}</strong>
+          </div>
+          <div className="meta-card">
+            <p>部署目标</p>
+            <strong>{formatStatus(deploymentPayload.targetKind || '')}</strong>
+          </div>
+          <div className="meta-card">
+            <p>Release Name</p>
+            <strong>{deploymentRequest.releaseName || '未配置'}</strong>
+          </div>
+          <div className="meta-card">
+            <p>密钥字段</p>
+            <strong>{secretEnvKeys.length ? secretEnvKeys.join(', ') : '无'}</strong>
+          </div>
+        </div>
+        {Object.keys(reviewRequest.requestPayload || {}).length > 0 && (
+          <div className="json-panels review-json-panels">
+            <pre className="json-block review-json-block">{JSON.stringify(reviewRequest.requestPayload, null, 2)}</pre>
+            {Object.keys(resultPayload || {}).length > 0 && (
+              <pre className="json-block review-json-block">{JSON.stringify(resultPayload, null, 2)}</pre>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className="resources resource-panel">
+        <h2>审核轨迹</h2>
+        <ReviewRequestTimeline events={events} />
+      </section>
+    </>
+  )
+}
+
+const MyReviewRequestsPage = () => {
+  const { session } = useSessionState()
+  const token = session.token || ''
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab = searchParams.get('tab') === 'assigned' ? 'assigned' : 'submitted'
+  const {
+    reviewRequests: submittedRequests,
+    isLoading: isSubmittedLoading,
+    error: submittedError,
+    refetch: refetchSubmitted,
+  } = useMyReviewRequests(token)
+  const {
+    reviewRequests: assignedRequests,
+    isLoading: isAssignedLoading,
+    error: assignedError,
+    refetch: refetchAssigned,
+  } = useAssignedReviewRequests(token, { status: 'pending' })
+  const [actionState, setActionState] = useState({ state: 'idle', message: '' })
+
+  if (!token) {
+    return <LoginRequiredState title="我的审核" description="请先登录，再查看你提交过的审核申请和待你处理的审核任务。" />
+  }
+
+  const handleCancelReviewRequest = async (reviewRequestId) => {
+    setActionState({ state: 'loading', message: '正在取消审核请求…' })
+    try {
+      await requestApi(
+        `/v1/review-requests/${encodeURIComponent(reviewRequestId)}/cancel`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        },
+        token,
+      )
+      await refetchSubmitted()
+      setActionState({ state: 'success', message: `审核请求 ${reviewRequestId} 已取消。` })
+    } catch (error) {
+      setActionState({ state: 'error', message: error.message || '取消审核请求失败。' })
+    }
+  }
+
+  const handleAssignedDecision = async (reviewRequestId, decision) => {
+    setActionState({ state: 'loading', message: decision === 'approve' ? '正在通过审核…' : '正在驳回审核…' })
+    try {
+      await requestApi(
+        `/v1/review-requests/${encodeURIComponent(reviewRequestId)}/${decision}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        },
+        token,
+      )
+      await refetchAssigned()
+      setActionState({ state: 'success', message: decision === 'approve' ? `审核 ${reviewRequestId} 已通过。` : `审核 ${reviewRequestId} 已驳回。` })
+    } catch (error) {
+      setActionState({ state: 'error', message: error.message || '处理审核失败。' })
+    }
+  }
+
+  const activeRequests = tab === 'assigned' ? assignedRequests : submittedRequests
+  const isLoading = tab === 'assigned' ? isAssignedLoading : isSubmittedLoading
+  const error = tab === 'assigned' ? assignedError : submittedError
+
+  return (
+    <div className="detail">
+      <p className="eyebrow">Review</p>
+      <h1>我的审核</h1>
+      <p className="lead">这里集中展示你提交过的审核申请，以及需要你作为频道 owner 处理的加入审核。</p>
+
+      <section className="resources resource-panel">
+        <div className="section-head section-head-tight">
+          <div>
+            <h2>审核列表</h2>
+            <p className="section-copy">申请人、请求上下文、审核状态和详情入口都会在这里统一展示。</p>
+          </div>
+          <div className="inline-actions">
+            <button type="button" className={tab === 'submitted' ? 'active-filter' : ''} onClick={() => setSearchParams({ tab: 'submitted' })}>
+              我提交的
+            </button>
+            <button type="button" className={tab === 'assigned' ? 'active-filter' : ''} onClick={() => setSearchParams({ tab: 'assigned' })}>
+              待我审批
+            </button>
+          </div>
+        </div>
+        {!!actionState.message && <p className={`auth-status ${actionState.state}`}>{actionState.message}</p>}
+        {isLoading && <p className="panel-state">正在加载审核列表…</p>}
+        {!isLoading && error && <p className="panel-state error">{error}</p>}
+        {!isLoading && !error && (
+          <ReviewRequestList
+            reviewRequests={activeRequests}
+            emptyText={tab === 'assigned' ? '当前没有待你处理的审核请求。' : '当前还没有提交过审核请求。'}
+            actionSlot={(reviewRequest) => (
+              <div className="task-card-actions">
+                {tab === 'submitted' && reviewRequest.resultPayload?.channelId && (
+                  <Link to={`/me/channels/${reviewRequest.resultPayload.channelId}`} className="ghost">
+                    查看频道
+                  </Link>
+                )}
+                {tab === 'submitted' && reviewRequest.status === 'pending' && (
+                  <button type="button" className="ghost" onClick={() => handleCancelReviewRequest(reviewRequest.id)}>
+                    取消申请
+                  </button>
+                )}
+                {tab === 'assigned' && reviewRequest.status === 'pending' && (
+                  <>
+                    <button type="button" className="ghost" onClick={() => handleAssignedDecision(reviewRequest.id, 'approve')}>
+                      通过
+                    </button>
+                    <button type="button" className="ghost danger" onClick={() => handleAssignedDecision(reviewRequest.id, 'reject')}>
+                      驳回
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          />
+        )}
+      </section>
+    </div>
+  )
+}
+
+const ReviewRequestDetailPage = () => {
+  const { reviewRequestId } = useParams()
+  const { session } = useSessionState()
+  const token = session.token || ''
+  const {
+    reviewRequest,
+    events,
+    isLoading,
+    error,
+    refetch,
+  } = useReviewRequestDetail(reviewRequestId, token)
+  const [actionState, setActionState] = useState({ state: 'idle', message: '' })
+
+  if (!token) {
+    return <LoginRequiredState title="审核详情" description="请先登录，再查看审核详情和审批轨迹。" />
+  }
+
+  const canApproveOrReject = Boolean(
+    reviewRequest
+    && reviewRequest.status === 'pending'
+    && reviewRequest.reviewerScope === 'channel_owner'
+    && reviewRequest.requester?.id !== session.userId,
+  )
+
+  const handleDecision = async (decision) => {
+    setActionState({ state: 'loading', message: decision === 'approve' ? '正在通过审核…' : '正在驳回审核…' })
+    try {
+      await requestApi(
+        `/v1/review-requests/${encodeURIComponent(reviewRequestId)}/${decision}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        },
+        token,
+      )
+      await refetch()
+      setActionState({ state: 'success', message: decision === 'approve' ? `审核 ${reviewRequestId} 已通过。` : `审核 ${reviewRequestId} 已驳回。` })
+    } catch (requestError) {
+      setActionState({ state: 'error', message: requestError.message || '处理审核失败。' })
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="detail">
+        <p className="eyebrow">Review</p>
+        <h1>加载审核详情中</h1>
+        <p className="lead">正在读取审核单、审核轨迹和上下文信息。</p>
+      </div>
+    )
+  }
+
+  if (!reviewRequest || error) {
+    return (
+      <div className="detail">
+        <p className="eyebrow">Review</p>
+        <h1>未找到该审核请求</h1>
+        <p className="lead">{error || '请返回审核列表重新选择。'}</p>
+        <Link className="primary" to="/me/review-requests">返回我的审核</Link>
+      </div>
+    )
+  }
+
+  return (
+    <div className="detail">
+      <p className="eyebrow">Review</p>
+      <h1>{reviewRequest.title || '审核详情'}</h1>
+      <p className="lead">这里展示这条审核请求的完整信息、申请人、审核轨迹，以及当前可执行的审批动作。</p>
+      <ReviewRequestDetailContent
+        reviewRequest={reviewRequest}
+        events={events}
+        actionState={actionState}
+        onDecision={handleDecision}
+        canApproveOrReject={canApproveOrReject}
+        backTo="/me/review-requests"
+        backLabel="返回我的审核"
+      />
     </div>
   )
 }
@@ -1882,7 +2359,7 @@ const MyChannelDetail = ({ channelId }) => {
     { label: 'Release Name', value: channel.releaseName || '未绑定' },
     { label: 'Resource Key', value: channel.resourceKey || '未绑定' },
     { label: '当前任务', value: channel.currentTaskId || '无' },
-    { label: 'TG 群 ID', value: getChannelTgGroupId(channel) || '未探测到' },
+    { label: 'TG 群 ID', value: getChannelTgGroupId(channel, { allowRuntimeFallback: true }) || '未探测到' },
   ]
   const canBootstrapConfig = Object.keys(bootstrapRequest).length > 0
   const secretFieldStates = buildSecretFieldStates(config?.secretEnvKeys || [])
@@ -2174,9 +2651,9 @@ const MyChannelDetail = ({ channelId }) => {
           </div>
           <div className="inline-actions">
             <Link to={`/channels/${resolveChannelRouteId(channel)}`}>公开详情</Link>
-            {getChannelPrimaryActionUrl(channel) && (
-              <a href={getChannelPrimaryActionUrl(channel)} target="_blank" rel="noreferrer">
-                {getChannelLinkLabel(channel)}
+            {getChannelPrimaryActionUrl(channel, { allowRuntimeFallback: true }) && (
+              <a href={getChannelPrimaryActionUrl(channel, { allowRuntimeFallback: true })} target="_blank" rel="noreferrer">
+                {getChannelLinkLabel(channel, { allowRuntimeFallback: true })}
               </a>
             )}
           </div>
@@ -2263,6 +2740,9 @@ const MyChannelDetail = ({ channelId }) => {
             <h2>加入审核</h2>
             <p className="section-copy">如果这个频道选择了“需要审核”，新的加入请求会在这里由频道 owner 处理。</p>
           </div>
+          <div className="inline-actions">
+            <Link to="/me/review-requests?tab=assigned">进入审核列表</Link>
+          </div>
         </div>
         {reviewActionState.message && <p className={`auth-status ${reviewActionState.state}`}>{reviewActionState.message}</p>}
         {isJoinReviewRequestsLoading && <p className="panel-state">正在加载待审核加入请求…</p>}
@@ -2271,6 +2751,7 @@ const MyChannelDetail = ({ channelId }) => {
           <ReviewRequestList
             reviewRequests={joinReviewRequests}
             emptyText="当前没有待审核的加入请求。"
+            detailBasePath="/me/review-requests"
             actionSlot={(reviewRequest) => (
               <div className="task-card-actions">
                 <button type="button" className="ghost" onClick={() => handleReviewDecision(reviewRequest.id, 'approve')}>
@@ -2602,6 +3083,7 @@ const AdminReviewRequests = () => {
           <ReviewRequestList
             reviewRequests={reviewRequests}
             emptyText="当前没有待处理的创建审核请求。"
+            detailBasePath="/admin/review-requests"
             actionSlot={(reviewRequest) => {
               const channelPayload = reviewRequest.requestPayload?.channel || {}
               const deploymentPayload = reviewRequest.requestPayload?.deployment || {}
@@ -2650,6 +3132,92 @@ const AdminReviewRequests = () => {
           />
         )}
       </section>
+    </div>
+  )
+}
+
+const AdminReviewRequestDetail = () => {
+  const { reviewRequestId } = useParams()
+  const { adminSession } = useSessionState()
+  const token = adminSession.token || ''
+  const {
+    reviewRequest,
+    events,
+    isLoading,
+    error,
+    refetch,
+  } = useReviewRequestDetail(reviewRequestId, token)
+  const [actionState, setActionState] = useState({ state: 'idle', message: '' })
+
+  if (!token) {
+    return (
+      <LoginRequiredState
+        title="管理员审核详情"
+        description="请先用管理员账号密码登录，然后再查看审核详情。"
+      />
+    )
+  }
+
+  const handleDecision = async (decision) => {
+    setActionState({
+      state: 'loading',
+      message: decision === 'approve' ? '正在通过创建审核…' : '正在驳回创建审核…',
+    })
+    try {
+      await requestApi(
+        `/v1/review-requests/${encodeURIComponent(reviewRequestId)}/${decision}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        },
+        token,
+      )
+      await refetch()
+      setActionState({
+        state: 'success',
+        message: decision === 'approve' ? `创建审核 ${reviewRequestId} 已通过。` : `创建审核 ${reviewRequestId} 已驳回。`,
+      })
+    } catch (requestError) {
+      setActionState({ state: 'error', message: requestError.message || '处理创建审核失败。' })
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="detail">
+        <p className="eyebrow">Admin</p>
+        <h1>加载审核详情中</h1>
+        <p className="lead">正在读取创建审核详情和审核轨迹。</p>
+      </div>
+    )
+  }
+
+  if (!reviewRequest || error) {
+    return (
+      <div className="detail">
+        <p className="eyebrow">Admin</p>
+        <h1>未找到该审核请求</h1>
+        <p className="lead">{error || '请返回管理员审核列表重新选择。'}</p>
+        <Link className="primary" to="/admin/review-requests">返回审核后台</Link>
+      </div>
+    )
+  }
+
+  return (
+    <div className="detail">
+      <p className="eyebrow">Admin</p>
+      <h1>{reviewRequest.title || '管理员审核详情'}</h1>
+      <p className="lead">这里会展示创建频道并部署的完整申请内容、申请人信息、敏感字段摘要和审核执行轨迹。</p>
+      <ReviewRequestDetailContent
+        reviewRequest={reviewRequest}
+        events={events}
+        actionState={actionState}
+        onDecision={handleDecision}
+        canApproveOrReject={reviewRequest.status === 'pending'}
+        backTo="/admin/review-requests"
+        backLabel="返回审核后台"
+      />
     </div>
   )
 }
@@ -2895,10 +3463,13 @@ function App() {
             <Route path="/workflows/:workflowId" element={<WorkflowDetail />} />
             <Route path="/channels/:idOrSlug" element={<ChannelDetail />} />
             <Route path="/me/channels" element={<MyChannels />} />
+            <Route path="/me/review-requests" element={<MyReviewRequestsPage />} />
+            <Route path="/me/review-requests/:reviewRequestId" element={<ReviewRequestDetailPage />} />
             <Route path="/me/channels/new" element={<CreateManagedChannel />} />
             <Route path="/me/channels/:channelId" element={<ManagedChannelDetailRoute />} />
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/admin/review-requests" element={<AdminReviewRequests />} />
+            <Route path="/admin/review-requests/:reviewRequestId" element={<AdminReviewRequestDetail />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Layout>

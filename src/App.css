@@ -420,6 +420,40 @@ nav a.active {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  align-items: flex-end;
+  min-width: 220px;
+}
+
+.channel-access-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.channel-access-secondary {
+  border-radius: 999px;
+  border: 1px solid #dbe4f0;
+  background: white;
+  color: #475569;
+  padding: 10px 16px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.92rem;
+  transition: border-color 0.2s ease, color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.channel-access-secondary:hover {
+  border-color: #94a3b8;
+  color: #0f172a;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+}
+
+.channel-access-secondary:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
 }
 
 .channel-access-note {
@@ -428,6 +462,7 @@ nav a.active {
   font-size: 0.85rem;
   line-height: 1.5;
   max-width: 320px;
+  text-align: right;
 }
 
 .channel-access-note.error {
@@ -1076,6 +1111,57 @@ nav a.active {
   line-height: 1.6;
 }
 
+.review-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.timeline-item {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  margin-top: 9px;
+  background: #0f172a;
+  flex: 0 0 auto;
+}
+
+.timeline-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.timeline-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.timeline-head span {
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.review-json-panels {
+  margin-top: 16px;
+}
+
+.review-json-block {
+  margin: 0;
+}
+
 .channel-item.coming-soon {
   border-style: dashed;
   color: #475569;
@@ -1234,6 +1320,19 @@ nav a.active {
 
   .channel-actions {
     justify-content: flex-start;
+  }
+
+  .channel-access-action {
+    min-width: 0;
+    align-items: flex-start;
+  }
+
+  .channel-access-controls {
+    justify-content: flex-start;
+  }
+
+  .channel-access-note {
+    text-align: left;
   }
 
   .task-card-head,
