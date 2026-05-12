@@ -412,35 +412,35 @@ function getChannelJoinActionState(channel, token = '') {
       }
     }
     if (access.canViewInvite) {
-      const joinUrl = getChannelPrimaryActionUrl(channel)
+      const joinUrl = getChannelTelegramUrl(channel)
       if (joinUrl) {
         return {
           kind: 'link',
-          label: getChannelLinkLabel(channel),
+          label: '加入频道',
           helper: '',
           href: joinUrl,
         }
       }
       return {
-        kind: 'approved',
-        label: '已获授权',
-        helper: '你已经有权限查看频道入口；如果入口还没出现，请稍后刷新。',
+        kind: 'unavailable',
+        label: '',
+        helper: '频道入口还没有准备好，等探测到 TG 群 ID 后再显示。',
       }
     }
     if (access.currentUserJoinStatus === 'approved') {
-      const joinUrl = getChannelPrimaryActionUrl(channel)
+      const joinUrl = getChannelTelegramUrl(channel)
       if (joinUrl) {
         return {
           kind: 'link',
-          label: getChannelLinkLabel(channel),
+          label: '加入频道',
           helper: '',
           href: joinUrl,
         }
       }
       return {
-        kind: 'approved',
-        label: '已获授权',
-        helper: '你已经通过审核；如果入口还没出现，请稍后刷新。',
+        kind: 'unavailable',
+        label: '',
+        helper: '你已经通过审核，但频道入口还没有准备好。',
       }
     }
     if (access.currentUserJoinStatus === 'rejected') {
@@ -457,11 +457,11 @@ function getChannelJoinActionState(channel, token = '') {
     }
   }
 
-  const joinUrl = getChannelPrimaryActionUrl(channel)
+  const joinUrl = getChannelTelegramUrl(channel)
   if (joinUrl) {
     return {
       kind: 'link',
-      label: getChannelLinkLabel(channel),
+      label: '加入频道',
       helper: '',
       href: joinUrl,
     }
@@ -1029,6 +1029,8 @@ const ChannelAccessAction = ({ channel, token, onActionComplete, showHelper = fa
         {action.label}
       </button>
     )
+  } else if (action.kind === 'unavailable') {
+    control = null
   } else {
     control = (
       <button type="button" disabled>
@@ -3472,8 +3474,8 @@ const AdminReviewRequestDetail = () => {
   }
 
   const handleDecision = async (decision) => {
-    if (decision === 'approve' && deploymentMode === 'manual' && !String(manualApprovalDraft.publicUrl || '').trim()) {
-      setActionState({ state: 'error', message: '手动部署申请在通过前必须先填写频道入口链接。' })
+    if (decision === 'approve' && deploymentMode === 'manual' && !String(manualApprovalDraft.tgGroupId || '').trim()) {
+      setActionState({ state: 'error', message: '手动部署申请在通过前必须先填写 TG 群 ID。' })
       return
     }
     setActionState({
@@ -3539,24 +3541,24 @@ const AdminReviewRequestDetail = () => {
       {reviewRequest.status === 'pending' && deploymentMode === 'manual' && (
         <section className="resources resource-panel">
           <h2>手动部署回填</h2>
-          <p className="section-copy">管理员手动部署完成后，在这里填写最终频道入口。通过审核时，系统会直接创建一个手动部署频道，效果类似当前导入的那几条手动频道。</p>
+          <p className="section-copy">管理员手动部署完成后，在这里填写 TG 群 ID；频道链接可以留空，系统会按 TG 群 ID 自动生成。通过审核时，系统会直接创建一个手动部署频道，效果类似当前导入的那几条手动频道。</p>
           <div className="editor-grid channel-create-form">
-            <label className="editor-field editor-field-wide">
-              <span>频道入口链接</span>
-              <input
-                type="url"
-                value={manualApprovalDraft.publicUrl}
-                onChange={(event) => setManualApprovalDraft((current) => ({ ...current, publicUrl: event.target.value }))}
-                placeholder="例如 https://t.me/+invite-token 或 https://example.com/channel"
-              />
-            </label>
             <label className="editor-field">
-              <span>TG 群 ID（可选）</span>
+              <span>TG 群 ID</span>
               <input
                 type="text"
                 value={manualApprovalDraft.tgGroupId}
                 onChange={(event) => setManualApprovalDraft((current) => ({ ...current, tgGroupId: event.target.value }))}
                 placeholder="例如 -1001234567890"
+              />
+            </label>
+            <label className="editor-field editor-field-wide">
+              <span>频道入口链接（可选）</span>
+              <input
+                type="url"
+                value={manualApprovalDraft.publicUrl}
+                onChange={(event) => setManualApprovalDraft((current) => ({ ...current, publicUrl: event.target.value }))}
+                placeholder="留空则根据 TG 群 ID 自动生成，例如 https://t.me/c/1234567890/1"
               />
             </label>
           </div>
