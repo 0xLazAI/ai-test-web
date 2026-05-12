@@ -1,43 +1,871 @@
-import { useMemo, useState, useEffect } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { BrowserRouter as Router, Routes, Route, Link, useParams, useNavigate } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Link, NavLink, useLocation, useParams, useNavigate } from 'react-router-dom'
 import { useAccount, useConnect, useDisconnect, useSignMessage } from 'wagmi'
+import { useQuery } from '@tanstack/react-query'
 
 const LOGIN_ENDPOINT = 'https://api.lazpad.fun/lazai'
 const LOGIN_QUERY = 'mutation login($req: LoginReq!) { login(req: $req) { data { userId token } } } '
 const PROFILE_QUERY = 'query getUserDetail($id: String!) { getUserDetail(id: $id) { data { name } success traceId } } '
 const GET_NONCE_QUERY = 'query getNonce($address: String!) { getNonce(address: $address) { data } } '
+const API_BASE_URL = (import.meta.env.VITE_OPENCLAW_API_BASE_URL || 'https://walrus-app-z3vsf.ondigitalocean.app').replace(/\/+$/, '')
 
-const workflows = [
-  {
-    id: 'singularity-studio',
-    name: '奇点编辑部',
-    description: '多智能体驱动的高质量内容生成与分发引擎。',
-    owner: '奇点编辑部',
-    status: 'Alpha · 内测',
-    cadence: '每日多轮迭代',
-    lastUpdated: new Date().toISOString().slice(0, 10),
-    metrics: [
-      { label: '节点', value: '7 个' },
-      { label: '负责人', value: 'Steven（@mnpemu）、Jim（@jimMao0x1）' },
-      { label: '上线渠道', value: 'Telegram' }
-    ],
-    phases: [
-      '素材雷达：AI 热点 + 原典补库',
-      '主编选题：3-5 个命题 + 观点挑选',
-      '逻辑对垒：Sentinel 与 Adversary 多轮 PK',
-      '导演翻译：将逻辑资产转成可消费内容',
-      '多渠道改写：口播脚本、剪辑稿、推送文',
-      '反馈回灌：热点升级与 rejected logic log 入库'
-    ],
-    resources: [
-      { label: '执行 SOP', url: 'https://example.com/sop' },
-      { label: '素材金库', url: 'https://example.com/vault' }
-    ]
-  }
+const SESSION_KEY = 'apixlab_session'
+const ADMIN_SESSION_KEY = 'apixlab_admin_session'
+const INITIAL_SESSION = { token: null, userId: null, profileName: '' }
+const INITIAL_ADMIN_SESSION = { token: null, adminId: null, username: '', role: '', expiresAt: '' }
+const SECRET_FIELD_DEFINITIONS = [
+  { key: 'CLAWCHEF_VAR_OPENAI_API_KEY', label: 'OpenAI API Key', kind: 'api', required: true },
+  { key: 'GEMINI_API_KEY', label: 'Gemini API Key', kind: 'api', required: true },
+  { key: 'CLAWCHEF_VAR_SINGULARITY_MAIN_TELEGRAM_BOT_KEY', label: '主编 Bot Token', kind: 'bot', required: true },
+  { key: 'CLAWCHEF_VAR_SINGULARITY_REVIEWER_TELEGRAM_BOT_KEY', label: '审核 Bot Token', kind: 'bot', required: true },
+  { key: 'CLAWCHEF_VAR_SINGULARITY_WRITER_TELEGRAM_BOT_KEY', label: '写手 Bot Token', kind: 'bot', required: false },
+  { key: 'CLAWCHEF_VAR_SINGULARITY_VIDEO_TELEGRAM_BOT_KEY', label: '视频 Bot Token', kind: 'bot', required: true },
 ]
 
+const SessionContext = createContext({
+  session: INITIAL_SESSION,
+  adminSession: INITIAL_ADMIN_SESSION,
+  setSession: () => undefined,
+  setAdminSession: () => undefined,
+})
+
+const STATUS_LABELS = {
+  admin: '管理员审核',
+  accepted: '已受理',
+  active: '已启用',
+  applied: '已落地',
+  apply_failed: '落地失败',
+  archived: '已归档',
+  auto: '自动部署',
+  approved: '已通过',
+  cancel_requested: '取消中',
+  cancelled: '已取消',
+  channel_create: '创建频道',
+  channel_join: '加入频道',
+  channel_owner: '频道 Owner 审核',
+  closed: '已关闭',
+  degraded: '降级',
+  deleted: '已删除',
+  deleting: '删除中',
+  docker: 'Docker',
+  docker_light_redeploy: '重新部署',
+  docker_redeploy: '深度重新部署',
+  draft: '草稿',
+  failed: '失败',
+  healthy: '健康',
+  k8s: 'Kubernetes',
+  k8s_deploy: 'K8s 首发部署',
+  k8s_redeploy: '重新部署',
+  k8s_deep_redeploy: '深度重新部署',
+  legacy_seed: '遗留导入',
+  manual: '手动部署',
+  none: '无需落地',
+  open: '开放申请',
+  paused: '已暂停',
+  pending: '待处理',
+  private: '私有',
+  probe: '探针发现',
+  provisioning: '部署中',
+  public: '公开',
+  queued: '排队中',
+  rejected: '已驳回',
+  retry_waiting: '等待重试',
+  review: '需审核',
+  running: '运行中',
+  stopped: '已停止',
+  succeeded: '成功',
+  telegram: 'Telegram',
+  unhealthy: '异常',
+  unknown: '未知',
+  unlisted: '不公开',
+}
+
+const ACTIVE_DEPLOY_TASK_STATUSES = new Set([
+  'accepted',
+  'queued',
+  'retry_waiting',
+  'running',
+  'cancel_requested',
+])
+
+function readStoredSession() {
+  try {
+    const stored = localStorage.getItem(SESSION_KEY)
+    return stored ? { ...INITIAL_SESSION, ...JSON.parse(stored) } : INITIAL_SESSION
+  } catch {
+    return INITIAL_SESSION
+  }
+}
+
+function readStoredAdminSession() {
+  try {
+    const stored = localStorage.getItem(ADMIN_SESSION_KEY)
+    return stored ? { ...INITIAL_ADMIN_SESSION, ...JSON.parse(stored) } : INITIAL_ADMIN_SESSION
+  } catch {
+    return INITIAL_ADMIN_SESSION
+  }
+}
+
+function SessionProvider({ children }) {
+  const [session, setSession] = useState(readStoredSession)
+  const [adminSession, setAdminSession] = useState(readStoredAdminSession)
+
+  useEffect(() => {
+    if (!session.token && !session.userId && !session.profileName) {
+      localStorage.removeItem(SESSION_KEY)
+      return
+    }
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session))
+  }, [session])
+
+  useEffect(() => {
+    if (!adminSession.token && !adminSession.adminId && !adminSession.username && !adminSession.role && !adminSession.expiresAt) {
+      localStorage.removeItem(ADMIN_SESSION_KEY)
+      return
+    }
+    localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(adminSession))
+  }, [adminSession])
+
+  return (
+    <SessionContext.Provider value={{ session, adminSession, setSession, setAdminSession }}>
+      {children}
+    </SessionContext.Provider>
+  )
+}
+
+function useSessionState() {
+  return useContext(SessionContext)
+}
+
+async function requestApi(path, init = {}, token = '') {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init.headers || {}),
+    },
+  })
+
+  const rawText = await response.text()
+  const payload = rawText ? safeParseJson(rawText) : null
+
+  if (!response.ok || (payload && typeof payload === 'object' && payload.success === false)) {
+    const message = typeof payload === 'string'
+      ? payload
+      : payload?.message
+        || payload?.error
+        || payload?.errors?.[0]?.message
+        || `请求失败：HTTP ${response.status}`
+    throw new Error(message)
+  }
+
+  return payload
+}
+
+function safeParseJson(value) {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}
+
+function formatDate(value) {
+  if (!value) {
+    return '未记录'
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return String(value)
+  }
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
+}
+
+function formatStatus(value) {
+  const normalized = String(value || '').trim()
+  if (!normalized) {
+    return '未配置'
+  }
+  return STATUS_LABELS[normalized] || normalized
+}
+
+function isActiveDeployTaskStatus(status) {
+  return ACTIVE_DEPLOY_TASK_STATUSES.has(String(status || '').trim())
+}
+
+function formatValue(value) {
+  if (Array.isArray(value)) {
+    return value.length ? value.join(', ') : '未配置'
+  }
+  if (value == null || value === '') {
+    return '未配置'
+  }
+  if (typeof value === 'object') {
+    return JSON.stringify(value)
+  }
+  return String(value)
+}
+
+function isMissingEndpointError(error) {
+  const message = String(error?.message || '')
+  return message.includes('HTTP 404') || message.includes('Not Found') || message.includes('Cannot GET')
+}
+
+function summarizeChannel(channel) {
+  return channel?.summary || channel?.descriptionPublic || '暂未填写公开说明。'
+}
+
+function resolveChannelRouteId(channel) {
+  return channel.slug || channel.id
+}
+
+function getChannelLinkLabel(channel) {
+  return getChannelTelegramUrl(channel) ? '加入频道' : ''
+}
+
+function getChannelDeploymentMode(channel) {
+  return channel?.deploymentMode || channel?.runtime?.deploymentMode || ''
+}
+
+function getChannelTgGroupId(channel) {
+  return channel?.tgGroupId || channel?.runtime?.tgGroupId || ''
+}
+
+function getChannelTelegramUrl(channel) {
+  const publicUrl = String(channel?.publicUrl || '').trim()
+  if (publicUrl && /(^https?:\/\/)?(t\.me|telegram\.me)\//i.test(publicUrl)) {
+    return publicUrl
+  }
+
+  const tgGroupId = String(getChannelTgGroupId(channel) || '').trim().replace(/^telegram:/i, '')
+  if (!tgGroupId) {
+    return ''
+  }
+
+  const normalized = tgGroupId.startsWith('-100')
+    ? tgGroupId.slice(4)
+    : tgGroupId.startsWith('-')
+      ? tgGroupId.slice(1)
+      : tgGroupId
+
+  return normalized ? `https://t.me/c/${normalized}/1` : ''
+}
+
+function getChannelPrimaryActionUrl(channel) {
+  return getChannelTelegramUrl(channel)
+}
+
+function getChannelInviteAccess(channel) {
+  return {
+    canViewInvite: Boolean(channel?.canViewInvite),
+    currentUserJoinStatus: String(channel?.currentUserJoinStatus || 'none').trim() || 'none',
+    currentReviewRequestId: String(channel?.currentReviewRequestId || '').trim() || null,
+  }
+}
+
+function getChannelJoinActionState(channel, token = '') {
+  const joinUrl = getChannelPrimaryActionUrl(channel)
+  if (joinUrl) {
+    return {
+      kind: 'link',
+      label: getChannelLinkLabel(channel),
+      helper: '',
+      href: joinUrl,
+    }
+  }
+
+  const access = getChannelInviteAccess(channel)
+  if (channel?.applicationMode === 'review') {
+    if (!token) {
+      return {
+        kind: 'login',
+        label: '登录后申请',
+        helper: '连接钱包并完成登录后，才能向频道 owner 提交加入申请。',
+      }
+    }
+    if (access.currentUserJoinStatus === 'pending') {
+      return {
+        kind: 'pending',
+        label: '审核中',
+        helper: '加入申请已经提交，等待频道 owner 审核。',
+      }
+    }
+    if (access.currentUserJoinStatus === 'approved') {
+      return {
+        kind: 'approved',
+        label: '已获授权',
+        helper: '你已经通过审核；如果入口还没出现，请稍后刷新。',
+      }
+    }
+    if (access.currentUserJoinStatus === 'rejected') {
+      return {
+        kind: 'apply',
+        label: '重新申请加入',
+        helper: '上一次申请未通过，可以重新提交申请。',
+      }
+    }
+    return {
+      kind: 'apply',
+      label: '申请加入',
+      helper: '提交后需要频道 owner 审核，通过后才会展示群入口。',
+    }
+  }
+
+  if (channel?.applicationMode === 'closed') {
+    return {
+      kind: 'closed',
+      label: '暂停加入',
+      helper: '当前频道关闭了新的加入申请。',
+    }
+  }
+
+  return {
+    kind: 'unavailable',
+    label: '暂未开放',
+    helper: '当前还没有可用的加入入口。',
+  }
+}
+
+function buildReviewRequestContext(reviewRequest) {
+  const parts = [
+    formatStatus(reviewRequest?.requestType),
+    reviewRequest?.workflowId || '',
+    reviewRequest?.subjectKey || reviewRequest?.subjectId || '',
+  ].filter(Boolean)
+  return parts.join(' · ') || '审核请求'
+}
+
+function sanitizeDeployConfigRequest(config) {
+  if (!config?.request || typeof config.request !== 'object' || Array.isArray(config.request)) {
+    return {}
+  }
+
+  return sanitizeRequestObject(config.request)
+}
+
+function sanitizeRequestObject(request) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) {
+    return {}
+  }
+
+  const cloned = JSON.parse(JSON.stringify(request))
+  delete cloned.secretEnv
+  delete cloned.channelId
+  return cloned
+}
+
+function mergeRequestPatch(base, patch) {
+  const result = JSON.parse(JSON.stringify(base || {}))
+
+  Object.entries(patch || {}).forEach(([key, value]) => {
+    if (value && typeof value === 'object' && !Array.isArray(value) && result[key] && typeof result[key] === 'object' && !Array.isArray(result[key])) {
+      result[key] = mergeRequestPatch(result[key], value)
+      return
+    }
+    result[key] = value
+  })
+
+  return result
+}
+
+function buildSecretFieldStates(secretEnvKeys = []) {
+  return SECRET_FIELD_DEFINITIONS.map((field) => ({
+    ...field,
+    configured: secretEnvKeys.includes(field.key),
+  }))
+}
+
+function buildSecretPatch(secretDrafts) {
+  return Object.entries(secretDrafts || {}).reduce((result, [key, value]) => {
+    const normalized = String(value || '').trim()
+    if (normalized) {
+      result[key] = normalized
+    }
+    return result
+  }, {})
+}
+
+function parseTagInput(value) {
+  return String(value || '')
+    .split(/[\n,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function normalizeChannelSlug(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function buildReleaseName(slug) {
+  const base = normalizeChannelSlug(slug).slice(0, 30) || 'channel'
+  const now = new Date()
+  const stamp = [
+    now.getUTCFullYear(),
+    String(now.getUTCMonth() + 1).padStart(2, '0'),
+    String(now.getUTCDate()).padStart(2, '0'),
+    String(now.getUTCHours()).padStart(2, '0'),
+    String(now.getUTCMinutes()).padStart(2, '0'),
+    String(now.getUTCSeconds()).padStart(2, '0'),
+  ].join('')
+  const nonce = Math.random().toString(36).slice(2, 6)
+  return `${base}-${stamp}-${nonce}`
+}
+
+function resolveBootstrapRequest(channel, config, tasks) {
+  if (config) {
+    return sanitizeDeployConfigRequest(config)
+  }
+
+  const latestTaskWithRequest = (tasks || []).find((task) => task?.requestPayload && typeof task.requestPayload === 'object' && !Array.isArray(task.requestPayload))
+  const base = sanitizeRequestObject(latestTaskWithRequest?.requestPayload)
+
+  if (channel?.targetKind === 'k8s') {
+    if (!base.releaseName && channel.releaseName) {
+      base.releaseName = channel.releaseName
+    }
+    if (!base.namespace && channel.namespace) {
+      base.namespace = channel.namespace
+    }
+  }
+
+  if (channel?.targetKind === 'docker' && !base.instanceName && channel.instanceName) {
+    base.instanceName = channel.instanceName
+  }
+
+  return base
+}
+
+function buildTaskSuccessMessage(task) {
+  const taskId = String(task?.taskId || task?.id || '').trim()
+  return taskId ? `已提交部署任务 ${taskId}` : '已提交部署任务。'
+}
+
+function getDeployTaskResourceLabel(task) {
+  return [task?.namespace, task?.releaseName].filter(Boolean).join(' / ') || task?.instanceName || '未绑定资源'
+}
+
+function resolveActiveChannelTask(tasks, currentTaskId) {
+  const normalizedCurrentTaskId = String(currentTaskId || '').trim()
+  if (normalizedCurrentTaskId) {
+    const currentTask = (tasks || []).find((task) => task?.id === normalizedCurrentTaskId)
+    if (currentTask && isActiveDeployTaskStatus(currentTask.status)) {
+      return currentTask
+    }
+  }
+
+  return (tasks || []).find((task) => isActiveDeployTaskStatus(task?.status)) || null
+}
+
+function usePublicWorkflows() {
+  const query = useQuery({
+    queryKey: ['public-workflows'],
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const result = await requestApi('/v1/workflows')
+      return Array.isArray(result?.workflows) ? result.workflows : []
+    },
+  })
+
+  return {
+    workflows: query.data || [],
+    isLoading: query.isLoading,
+    error: query.error?.message || '',
+    refetch: query.refetch,
+  }
+}
+
+function usePublicWorkflow(workflowId) {
+  const query = useQuery({
+    queryKey: ['public-workflow', workflowId],
+    enabled: Boolean(workflowId),
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const result = await requestApi(`/v1/workflows/${encodeURIComponent(workflowId)}`)
+      return result?.workflow || null
+    },
+  })
+
+  return {
+    workflow: query.data || null,
+    isLoading: Boolean(workflowId) && query.isLoading,
+    error: workflowId ? (query.error?.message || '') : '缺少工作流标识。',
+    refetch: query.refetch,
+  }
+}
+
+function usePublicChannels(workflowId = '', token = '') {
+  const query = useQuery({
+    queryKey: ['public-channels', workflowId, token],
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const params = new URLSearchParams()
+      if (workflowId) {
+        params.set('workflowId', workflowId)
+      }
+      const suffix = params.toString() ? `?${params.toString()}` : ''
+      const result = await requestApi(`/v1/channels${suffix}`, {}, token)
+      return Array.isArray(result?.channels) ? result.channels : []
+    },
+  })
+
+  return {
+    channels: query.data || [],
+    isLoading: query.isLoading,
+    error: query.error?.message || '',
+    refetch: query.refetch,
+  }
+}
+
+function usePublicChannel(idOrSlug, token = '') {
+  const query = useQuery({
+    queryKey: ['public-channel', idOrSlug, token],
+    enabled: Boolean(idOrSlug),
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const result = await requestApi(`/v1/channels/${encodeURIComponent(idOrSlug)}`, {}, token)
+      return result?.channel || null
+    },
+  })
+
+  return {
+    channel: query.data || null,
+    isLoading: Boolean(idOrSlug) && query.isLoading,
+    error: idOrSlug ? (query.error?.message || '') : '缺少频道标识。',
+    refetch: query.refetch,
+  }
+}
+
+function useMyReviewRequests(token, filters = {}) {
+  const requestType = String(filters.requestType || '').trim()
+  const status = String(filters.status || '').trim()
+  const query = useQuery({
+    queryKey: ['my-review-requests', token, requestType, status],
+    enabled: Boolean(token),
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const params = new URLSearchParams()
+      if (requestType) {
+        params.set('requestType', requestType)
+      }
+      if (status) {
+        params.set('status', status)
+      }
+      const suffix = params.toString() ? `?${params.toString()}` : ''
+      try {
+        const result = await requestApi(`/v1/me/review-requests${suffix}`, {}, token)
+        return Array.isArray(result?.reviewRequests) ? result.reviewRequests : []
+      } catch (error) {
+        if (isMissingEndpointError(error)) {
+          return []
+        }
+        throw error
+      }
+    },
+  })
+
+  return {
+    reviewRequests: query.data || [],
+    isLoading: Boolean(token) && query.isLoading,
+    error: query.error?.message || '',
+    refetch: query.refetch,
+  }
+}
+
+function useManagedChannelJoinRequests(channelId, token, status = 'pending') {
+  const query = useQuery({
+    queryKey: ['managed-channel-join-requests', channelId, token, status],
+    enabled: Boolean(channelId && token),
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const params = new URLSearchParams()
+      if (status) {
+        params.set('status', status)
+      }
+      const suffix = params.toString() ? `?${params.toString()}` : ''
+      try {
+        const result = await requestApi(`/v1/me/channels/${encodeURIComponent(channelId)}/join-requests${suffix}`, {}, token)
+        return Array.isArray(result?.reviewRequests) ? result.reviewRequests : []
+      } catch (error) {
+        if (isMissingEndpointError(error)) {
+          return []
+        }
+        throw error
+      }
+    },
+  })
+
+  return {
+    reviewRequests: query.data || [],
+    isLoading: Boolean(channelId && token) && query.isLoading,
+    error: query.error?.message || '',
+    refetch: query.refetch,
+  }
+}
+
+function useManagedChannelMembers(channelId, token) {
+  const query = useQuery({
+    queryKey: ['managed-channel-members', channelId, token],
+    enabled: Boolean(channelId && token),
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      try {
+        const result = await requestApi(`/v1/me/channels/${encodeURIComponent(channelId)}/members`, {}, token)
+        return Array.isArray(result?.memberships) ? result.memberships : []
+      } catch (error) {
+        if (isMissingEndpointError(error)) {
+          return []
+        }
+        throw error
+      }
+    },
+  })
+
+  return {
+    memberships: query.data || [],
+    isLoading: Boolean(channelId && token) && query.isLoading,
+    error: query.error?.message || '',
+    refetch: query.refetch,
+  }
+}
+
+function useAdminReviewRequests(token, filters = {}) {
+  const requestType = String(filters.requestType || '').trim()
+  const status = String(filters.status || '').trim()
+  const query = useQuery({
+    queryKey: ['admin-review-requests', token, requestType, status],
+    enabled: Boolean(token),
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const params = new URLSearchParams()
+      if (requestType) {
+        params.set('requestType', requestType)
+      }
+      if (status) {
+        params.set('status', status)
+      }
+      const suffix = params.toString() ? `?${params.toString()}` : ''
+      const result = await requestApi(`/v1/admin/review-requests${suffix}`, {}, token)
+      return Array.isArray(result?.reviewRequests) ? result.reviewRequests : []
+    },
+  })
+
+  return {
+    reviewRequests: query.data || [],
+    isLoading: Boolean(token) && query.isLoading,
+    error: query.error?.message || '',
+    refetch: query.refetch,
+  }
+}
+
+const ChannelAccessAction = ({ channel, token, onActionComplete, showHelper = false }) => {
+  const navigate = useNavigate()
+  const action = getChannelJoinActionState(channel, token)
+  const [state, setState] = useState({ kind: 'idle', message: '' })
+
+  const focusLogin = () => {
+    const loginAnchor = document.getElementById('header-auth-control')
+    if (loginAnchor) {
+      loginAnchor.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }
+
+  const handleApply = async () => {
+    if (!token) {
+      focusLogin()
+      setState({ kind: 'error', message: '请先连接钱包并完成登录。' })
+      return
+    }
+
+    setState({ kind: 'loading', message: '正在提交加入申请…' })
+    try {
+      const result = await requestApi(
+        `/v1/channels/${encodeURIComponent(channel.id)}/applications`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        },
+        token,
+      )
+      setState({
+        kind: 'success',
+        message: `已提交加入申请 ${result?.application?.id || ''}，等待频道 owner 审核。`,
+      })
+      await onActionComplete?.()
+    } catch (error) {
+      setState({ kind: 'error', message: error.message || '提交加入申请失败。' })
+    }
+  }
+
+  const handleLogin = () => {
+    focusLogin()
+    navigate('/me/channels')
+  }
+
+  let control = null
+  if (action.kind === 'link' && action.href) {
+    control = (
+      <a href={action.href} target="_blank" rel="noreferrer">
+        {action.label}
+      </a>
+    )
+  } else if (action.kind === 'apply') {
+    control = (
+      <button type="button" onClick={handleApply} disabled={state.kind === 'loading'}>
+        {state.kind === 'loading' ? '提交中…' : action.label}
+      </button>
+    )
+  } else if (action.kind === 'login') {
+    control = (
+      <button type="button" onClick={handleLogin}>
+        {action.label}
+      </button>
+    )
+  } else {
+    control = (
+      <button type="button" disabled>
+        {action.label}
+      </button>
+    )
+  }
+
+  const helperMessage = state.message || (showHelper ? action.helper : '')
+  return (
+    <div className="channel-access-action">
+      {control}
+      {!!helperMessage && (
+        <p className={`channel-access-note ${state.kind === 'error' ? 'error' : state.kind === 'success' ? 'success' : ''}`}>
+          {helperMessage}
+        </p>
+      )}
+    </div>
+  )
+}
+
+const ReviewRequestList = ({ reviewRequests, emptyText, actionSlot }) => {
+  if (!reviewRequests.length) {
+    return <p className="panel-state">{emptyText}</p>
+  }
+
+  return (
+    <div className="task-list">
+      {reviewRequests.map((reviewRequest) => (
+        <article key={reviewRequest.id} className="task-card">
+          <div className="task-card-head">
+            <div>
+              <p className="task-title">{reviewRequest.title || buildReviewRequestContext(reviewRequest)}</p>
+              <p className="task-meta">
+                {formatStatus(reviewRequest.status)}
+                {reviewRequest.applyStatus && reviewRequest.applyStatus !== 'none' ? ` · ${formatStatus(reviewRequest.applyStatus)}` : ''}
+                {' · '}
+                {formatDate(reviewRequest.createdAt)}
+              </p>
+            </div>
+            <span className="sub-chip">{formatStatus(reviewRequest.requestType)}</span>
+          </div>
+          <p className="task-meta">请求上下文 · {buildReviewRequestContext(reviewRequest)}</p>
+          {reviewRequest.summary && <p className="task-meta">申请说明 · {reviewRequest.summary}</p>}
+          {reviewRequest.reviewNote && <p className="task-meta">审核备注 · {reviewRequest.reviewNote}</p>}
+          {reviewRequest.applyError && <p className="task-error">{reviewRequest.applyError}</p>}
+          {actionSlot?.(reviewRequest)}
+        </article>
+      ))}
+    </div>
+  )
+}
+
+function useManagedChannels(token) {
+  const query = useQuery({
+    queryKey: ['managed-channels', token],
+    enabled: Boolean(token),
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const result = await requestApi('/v1/me/channels', {}, token)
+      return Array.isArray(result?.channels) ? result.channels : []
+    },
+  })
+
+  return {
+    channels: query.data || [],
+    isLoading: Boolean(token) && query.isLoading,
+    error: query.error?.message || '',
+    refetch: query.refetch,
+  }
+}
+
+function useManagedChannel(channelId, token) {
+  const query = useQuery({
+    queryKey: ['managed-channel', channelId, token],
+    enabled: Boolean(channelId && token),
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const result = await requestApi(`/v1/me/channels/${encodeURIComponent(channelId)}`, {}, token)
+      return result?.channel || null
+    },
+  })
+
+  return {
+    channel: query.data || null,
+    isLoading: Boolean(channelId && token) && query.isLoading,
+    error: query.error?.message || '',
+    refetch: query.refetch,
+  }
+}
+
+function useManagedChannelDeployConfig(channelId, token) {
+  const query = useQuery({
+    queryKey: ['managed-channel-deploy-config', channelId, token],
+    enabled: Boolean(channelId && token),
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const result = await requestApi(`/v1/channels/${encodeURIComponent(channelId)}/deployment-config`, {}, token)
+      return result?.config || null
+    },
+  })
+
+  return {
+    config: query.data || null,
+    isLoading: Boolean(channelId && token) && query.isLoading,
+    error: query.error?.message || '',
+    refetch: query.refetch,
+  }
+}
+
+function useManagedChannelTasks(channelId, token) {
+  const query = useQuery({
+    queryKey: ['managed-channel-tasks', channelId, token],
+    enabled: Boolean(channelId && token),
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const result = await requestApi(`/v1/me/channels/${encodeURIComponent(channelId)}/tasks`, {}, token)
+      return Array.isArray(result?.tasks) ? result.tasks : []
+    },
+  })
+
+  return {
+    tasks: query.data || [],
+    isLoading: Boolean(channelId && token) && query.isLoading,
+    error: query.error?.message || '',
+    refetch: query.refetch,
+  }
+}
+
 const Layout = ({ children }) => {
+  const { adminSession } = useSessionState()
+
   return (
     <div className="site-shell">
       <div className="gradient-bg" aria-hidden="true" />
@@ -49,7 +877,20 @@ const Layout = ({ children }) => {
             <span className="brand-tagline">Workflow Playground</span>
           </div>
         </Link>
-        <HeaderAuthControl />
+        <div className="header-side">
+          <nav className="site-nav">
+            <NavLink to="/" end>
+              工作流
+            </NavLink>
+            <NavLink to="/me/channels">
+              我的频道
+            </NavLink>
+            <NavLink to={adminSession.token ? '/admin/review-requests' : '/admin/login'}>
+              {adminSession.token ? '审核后台' : '管理员登录'}
+            </NavLink>
+          </nav>
+          <HeaderAuthControl />
+        </div>
       </header>
       <main className="page-area">{children}</main>
       <footer className="site-footer">
@@ -62,6 +903,7 @@ const Layout = ({ children }) => {
 
 const Home = () => {
   const navigate = useNavigate()
+  const { workflows, isLoading, error } = usePublicWorkflows()
 
   return (
     <div className="home">
@@ -83,36 +925,42 @@ const Home = () => {
           <span className="count">{workflows.length} 套</span>
         </div>
 
-        <div className="workflow-grid">
-          {workflows.map((flow) => (
-            <article key={flow.id} className="workflow-card">
-              <div className="workflow-cta">
-                <div>
-                  <p className="chip">{flow.status}</p>
-                  <h3>{flow.name}</h3>
-                  <p className="muted">{flow.description}</p>
+        {isLoading && <p className="panel-state">正在加载工作流目录…</p>}
+        {!isLoading && error && <p className="panel-state error">{error}</p>}
+        {!isLoading && !error && workflows.length === 0 && <p className="panel-state">当前还没有可展示的工作流。</p>}
+
+        {!isLoading && !error && workflows.length > 0 && (
+          <div className="workflow-grid">
+            {workflows.map((flow) => (
+              <article key={flow.id} className="workflow-card">
+                <div className="workflow-cta">
+                  <div>
+                    <p className="chip">{flow.statusLabel || '已上线'}</p>
+                    <h3>{flow.name}</h3>
+                    <p className="muted">{flow.description}</p>
+                  </div>
+                  <button type="button" onClick={() => navigate(`/workflows/${flow.id}`)}>
+                    查看工作流并接入
+                  </button>
                 </div>
-                <button type="button" onClick={() => navigate(`/workflows/${flow.id}`)}>
-                  查看工作流并接入
-                </button>
-              </div>
-              <dl>
-                <div>
-                  <dt>Owner</dt>
-                  <dd>{flow.owner}</dd>
-                </div>
-                <div>
-                  <dt>节奏</dt>
-                  <dd>{flow.cadence}</dd>
-                </div>
-                <div>
-                  <dt>更新</dt>
-                  <dd>{flow.lastUpdated}</dd>
-                </div>
-              </dl>
-            </article>
-          ))}
-        </div>
+                <dl>
+                  <div>
+                    <dt>Owner</dt>
+                    <dd>{flow.ownerName || '未配置'}</dd>
+                  </div>
+                  <div>
+                    <dt>频道数</dt>
+                    <dd>{flow.channelCount} 个</dd>
+                  </div>
+                  <div>
+                    <dt>更新</dt>
+                    <dd>{formatDate(flow.updatedAt)}</dd>
+                  </div>
+                </dl>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   )
@@ -120,32 +968,50 @@ const Home = () => {
 
 const WorkflowDetail = () => {
   const { workflowId } = useParams()
-  const workflow = workflows.find((flow) => flow.id === workflowId)
+  const { session } = useSessionState()
+  const token = session.token || ''
+  const { workflow, isLoading: isWorkflowLoading, error: workflowError } = usePublicWorkflow(workflowId)
+  const { channels, isLoading: isChannelsLoading, error: channelsError, refetch: refetchChannels } = usePublicChannels(workflowId, token)
 
   const checklist = useMemo(() => [
-    '加入已有频道，直接和群里的 SingularityEditor 等 agent 交互，按预设工作流完成内容输出（新用户享 100 次免费交互）。',
-    '联系管理员 Jim 新建频道：担任主编、搭建知识库，并微调工作流到你期望的产出状态。'
+    '连接钱包并完成 LazAI 登录，后续需要用户态接口时可以直接带 Bearer token 调 OpenClaw。',
+    '先浏览公开频道，确认实例状态、部署方式和运行入口是否符合预期。',
+    '如果需要私有化频道或定制部署，再继续接用户态创建和部署接口。',
   ], [])
 
-  if (!workflow) {
+  if (isWorkflowLoading) {
+    return (
+      <div className="detail">
+        <p className="eyebrow">Workflow</p>
+        <h1>加载工作流中</h1>
+        <p className="lead">正在读取工作流详情和关联频道。</p>
+      </div>
+    )
+  }
+
+  if (!workflow || workflowError) {
     return (
       <div className="detail">
         <p className="eyebrow">Workflow</p>
         <h1>未找到该工作流</h1>
-        <p className="lead">请返回主页，或联系 APIXLab 获取更多配置。</p>
+        <p className="lead">{workflowError || '请返回主页，或联系 APIXLab 获取更多配置。'}</p>
         <Link className="primary" to="/">返回主页</Link>
       </div>
     )
   }
 
+  const workflowMetrics = Array.isArray(workflow.metrics) ? workflow.metrics : []
+  const workflowPhases = Array.isArray(workflow.phases) ? workflow.phases : []
+  const workflowResources = Array.isArray(workflow.resources) ? workflow.resources : []
+
   return (
     <div className="detail">
       <p className="eyebrow">Workflow</p>
       <h1>{workflow.name}</h1>
-      <p className="lead">{workflow.description}</p>
+      <p className="lead">{workflow.description || '暂未填写工作流说明。'}</p>
 
       <div className="stats">
-        {workflow.metrics.map((metric) => (
+        {[...workflowMetrics, { label: '频道', value: `${workflow.channelCount || channels.length} 个` }].map((metric) => (
           <div key={metric.label}>
             <p className="stat-value">{metric.value}</p>
             <p className="stat-label">{metric.label}</p>
@@ -154,56 +1020,65 @@ const WorkflowDetail = () => {
       </div>
 
       <section className="resources">
-        <h2>频道列表</h2>
-        <div className="channel-list">
-          <div className="channel-item">
-            <div>
-              <p className="channel-title">AI 科技</p>
-              <p className="channel-desc">即时获取 AI 热点和实战 SOP</p>
-            </div>
-            <a href="https://t.me/+ZBIjbFr989M4Nzk9" target="_blank" rel="noreferrer">加入频道</a>
+        <div className="section-head section-head-tight">
+          <div>
+            <h2>频道列表</h2>
+            <p className="section-copy">当前展示的是这个 workflow 下的公开频道。你也可以直接在这里新建一个频道挂到当前 workflow。</p>
           </div>
-          <div className="channel-item">
-            <div>
-              <p className="channel-title">黑暗幻想</p>
-              <p className="channel-desc">黑暗叙事、逻辑对垒与世界观共创</p>
-            </div>
-            <a href="https://t.me/+whfhVny20DAzYWU1" target="_blank" rel="noreferrer">加入频道</a>
-          </div>
-          <div className="channel-item">
-            <div>
-              <p className="channel-title">METIS / LAZAI 新闻</p>
-              <p className="channel-desc">Metis & LazAI 生态快讯、数据与链上动态</p>
-            </div>
-            <a href="https://t.me/+s0hKNc2LVbYwOTVl" target="_blank" rel="noreferrer">加入频道</a>
-          </div>
-          <div className="channel-item coming-soon">
-            <div>
-              <p className="channel-title">创建新频道</p>
-              <p className="channel-desc">Coming soon —— 支持自定义频道与自动化接入</p>
-            </div>
-            <span>敬请期待</span>
+          <div className="inline-actions">
+            <Link to={`/me/channels/new?workflowId=${encodeURIComponent(workflow.id)}`}>新建并部署</Link>
           </div>
         </div>
+        {isChannelsLoading && <p className="panel-state">正在加载公开频道…</p>}
+        {!isChannelsLoading && channelsError && <p className="panel-state error">{channelsError}</p>}
+        {!isChannelsLoading && !channelsError && channels.length === 0 && <p className="panel-state">当前工作流下还没有可展示的频道。</p>}
+
+        {!isChannelsLoading && !channelsError && channels.length > 0 && (
+          <div className="channel-list">
+            {channels.map((channel) => (
+              <div key={channel.id} className="channel-item">
+                <div>
+                  <p className="channel-title">{channel.name}</p>
+                  <p className="channel-desc">{summarizeChannel(channel)}</p>
+                  <p className="channel-meta">
+                    {formatStatus(channel.targetKind)} · {formatStatus(getChannelDeploymentMode(channel))} · {formatStatus(channel.lifecycleStatus)} · {formatStatus(channel.healthStatus)}
+                  </p>
+                  {channel.applicationMode === 'review' && !channel.canViewInvite && (
+                    <p className="channel-meta">
+                      加入策略 · {formatStatus(channel.applicationMode)}
+                      {channel.currentUserJoinStatus && channel.currentUserJoinStatus !== 'none' ? ` · ${formatStatus(channel.currentUserJoinStatus)}` : ''}
+                    </p>
+                  )}
+                </div>
+                <div className="channel-actions">
+                  <Link to={`/channels/${resolveChannelRouteId(channel)}`}>查看详情</Link>
+                  <ChannelAccessAction channel={channel} token={token} onActionComplete={refetchChannels} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
-      <section className="phases">
-        <h2>核心阶段</h2>
-        <ol>
-          {workflow.phases.map((phase, index) => (
-            <li key={phase}>
-              <span>{index + 1}</span>
-              <p>{phase}</p>
-            </li>
-          ))}
-        </ol>
-      </section>
+      {workflowPhases.length > 0 && (
+        <section className="phases">
+          <h2>核心阶段</h2>
+          <ol>
+            {workflowPhases.map((phase, index) => (
+              <li key={`${phase}-${index}`}>
+                <span>{index + 1}</span>
+                <p>{phase}</p>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
 
       <section className="resources">
         <h2>接入指南</h2>
         <div className="resource-links flow-guide">
           <div>
-            <p className="guide-title">使用流程</p>
+            <p className="guide-title">当前接入状态</p>
             <ol>
               {checklist.map((item) => (
                 <li key={item}>{item}</li>
@@ -211,69 +1086,1597 @@ const WorkflowDetail = () => {
             </ol>
           </div>
           <div>
-            <p className="guide-title">机器人清单</p>
-            <ul>
-              <li>SingularityEditor —— 主流程 / SOP 执行</li>
-              <li>@jimDuelBot —— 逻辑对垒 / Sentinel PK / 内容审核</li>
+            <p className="guide-title">接口入口</p>
+            <ul className="api-link-list">
+              <li>
+                <span>公开频道列表</span>
+                <a href={`${API_BASE_URL}/v1/channels`} target="_blank" rel="noreferrer">
+                  <code>GET /v1/channels</code>
+                </a>
+              </li>
+              <li>
+                <span>频道详情</span>
+                <a href={`${API_BASE_URL}/v1/channels/${channels[0] ? resolveChannelRouteId(channels[0]) : ''}`} target="_blank" rel="noreferrer">
+                  <code>GET /v1/channels/:idOrSlug</code>
+                </a>
+              </li>
+              <li>
+                <span>我的频道列表</span>
+                <code>GET /v1/me/channels</code>
+              </li>
+              <li>
+                <span>部署配置维护</span>
+                <code>PATCH /v1/channels/:channelId/deployment-config</code>
+              </li>
+              <li>
+                <span>服务健康检查</span>
+                <a href={`${API_BASE_URL}/healthz`} target="_blank" rel="noreferrer">
+                  <code>GET /healthz</code>
+                </a>
+              </li>
             </ul>
           </div>
         </div>
       </section>
 
-      <section className="resources">
-        <h2>相关资源</h2>
-        <div className="resource-links">
-          {workflow.resources.map((item) => (
-            <a key={item.label} href={item.url} target="_blank" rel="noreferrer">
-              {item.label}
-            </a>
-          ))}
-        </div>
-      </section>
+      {workflowResources.length > 0 && (
+        <section className="resources">
+          <h2>相关资源</h2>
+          <div className="resource-links">
+            {workflowResources.map((item) => (
+              <a key={`${item.label}-${item.url}`} href={item.url.startsWith('http') ? item.url : `${API_BASE_URL}${item.url}`} target="_blank" rel="noreferrer">
+                {item.label}
+              </a>
+            ))}
+            <Link to="/me/channels">进入我的频道</Link>
+          </div>
+        </section>
+      )}
 
       <Link className="primary" to="/">返回 APIXLab</Link>
     </div>
   )
 }
 
+const ChannelDetail = () => {
+  const { idOrSlug } = useParams()
+  const { session } = useSessionState()
+  const token = session.token || ''
+  const { channel, isLoading, error, refetch } = usePublicChannel(idOrSlug, token)
 
-const SESSION_KEY = 'apixlab_session'
-const INITIAL_SESSION = { token: null, userId: null, profileName: '' }
+  if (isLoading) {
+    return (
+      <div className="detail">
+        <p className="eyebrow">Channel</p>
+        <h1>加载频道详情中</h1>
+        <p className="lead">正在请求 OpenClaw 公开频道接口。</p>
+      </div>
+    )
+  }
+
+  if (error || !channel) {
+    return (
+      <div className="detail">
+        <p className="eyebrow">Channel</p>
+        <h1>频道详情加载失败</h1>
+        <p className="lead">{error || '未找到该频道。'}</p>
+        <Link className="primary" to="/">返回主页</Link>
+      </div>
+    )
+  }
+
+  const detailMetrics = [
+    { label: '运行状态', value: formatStatus(channel.lifecycleStatus) },
+    { label: '健康状态', value: formatStatus(channel.healthStatus) },
+    { label: '部署目标', value: formatStatus(channel.targetKind) },
+    { label: '部署模式', value: formatStatus(getChannelDeploymentMode(channel)) },
+    { label: 'Owner', value: channel.owner?.name || '未知' },
+  ]
+
+  const metadata = [
+    { label: 'Slug', value: channel.slug },
+    { label: '来源标记', value: formatStatus(channel.sourceType) },
+    { label: 'TG 群 ID', value: getChannelTgGroupId(channel) || '未配置' },
+    { label: 'TG 群 ID 来源', value: formatStatus(channel.tgGroupIdSource) },
+    { label: '公开级别', value: formatStatus(channel.visibility) },
+    { label: '申请模式', value: formatStatus(channel.applicationMode) },
+    { label: '频道状态', value: formatStatus(channel.status) },
+    { label: '创建时间', value: formatDate(channel.createdAt) },
+    { label: '最后更新', value: formatDate(channel.updatedAt) },
+  ]
+
+  const desiredSpecEntries = [
+    { label: '镜像仓库', value: channel.desiredSpec?.image?.repository },
+    { label: '镜像标签', value: channel.desiredSpec?.image?.tag },
+    { label: '拉取策略', value: channel.desiredSpec?.image?.pullPolicy },
+    { label: 'PVC 大小', value: channel.desiredSpec?.persistence?.size },
+    { label: '存储类', value: channel.desiredSpec?.persistence?.storageClassName },
+    { label: 'Access Modes', value: channel.desiredSpec?.persistence?.accessModes },
+  ]
+
+  const runtimeEntries = [
+    { label: '运行摘要', value: channel.runtime?.status },
+    { label: '最近任务类型', value: channel.runtime?.lastTaskType },
+    { label: '最近任务 ID', value: channel.runtime?.lastTaskId },
+    { label: '当前任务 ID', value: channel.runtime?.currentTaskId },
+    { label: 'TG 探针状态', value: channel.runtime?.tgGroupIdProbeStatus },
+    { label: 'TG 探针来源', value: channel.runtime?.tgGroupIdProbeSource },
+    { label: 'TG 探针说明', value: channel.runtime?.tgGroupIdProbeReason },
+    { label: '运行时更新时间', value: formatDate(channel.runtime?.updatedAt) },
+    { label: '错误信息', value: channel.runtime?.errorMessage || '无' },
+  ]
+
+  return (
+    <div className="detail">
+      <p className="eyebrow">Channel</p>
+      <h1>{channel.name}</h1>
+      <p className="lead">{channel.descriptionPublic || summarizeChannel(channel)}</p>
+
+      <div className="stats">
+        {detailMetrics.map((metric) => (
+          <div key={metric.label}>
+            <p className="stat-value">{metric.value}</p>
+            <p className="stat-label">{metric.label}</p>
+          </div>
+        ))}
+      </div>
+
+      <section className="resources">
+        <h2>访问入口</h2>
+        <div className="resource-links">
+          <ChannelAccessAction channel={channel} token={token} onActionComplete={refetch} showHelper />
+          <a href={`${API_BASE_URL}/v1/channels/${resolveChannelRouteId(channel)}`} target="_blank" rel="noreferrer">
+            查看原始 JSON
+          </a>
+        </div>
+      </section>
+
+      <section className="resources">
+        <h2>公开元数据</h2>
+        <div className="meta-grid">
+          {metadata.map((item) => (
+            <div key={item.label} className="meta-card">
+              <p>{item.label}</p>
+              <strong>{formatValue(item.value)}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="resources">
+        <h2>部署摘要</h2>
+        <div className="meta-grid">
+          {desiredSpecEntries.map((item) => (
+            <div key={item.label} className="meta-card">
+              <p>{item.label}</p>
+              <strong>{formatValue(item.value)}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="resources">
+        <h2>运行态</h2>
+        <div className="meta-grid">
+          {runtimeEntries.map((item) => (
+            <div key={item.label} className="meta-card">
+              <p>{item.label}</p>
+              <strong>{formatValue(item.value)}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {!!channel.tags?.length && (
+        <section className="resources">
+          <h2>频道标签</h2>
+          <div className="status-pills">
+            {channel.tags.map((tag) => (
+              <span key={tag} className="sub-chip">{tag}</span>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="resources">
+        <h2>原始配置快照</h2>
+        <div className="json-panels">
+          <div>
+            <p className="guide-title">desiredSpec</p>
+            <pre className="json-block">{JSON.stringify(channel.desiredSpec || {}, null, 2)}</pre>
+          </div>
+          <div>
+            <p className="guide-title">runtime</p>
+            <pre className="json-block">{JSON.stringify(channel.runtime || {}, null, 2)}</pre>
+          </div>
+        </div>
+      </section>
+
+      <Link className="primary" to="/">返回频道列表</Link>
+    </div>
+  )
+}
+
+const LoginRequiredState = ({ title = '需要登录', description = '请先在右上角连接钱包并完成 LazAI 登录，然后再查看你的频道和维护入口。' }) => (
+  <div className="detail">
+    <p className="eyebrow">Workspace</p>
+    <h1>{title}</h1>
+    <p className="lead">{description}</p>
+    <Link className="primary" to="/">返回主页</Link>
+  </div>
+)
+
+const MyChannels = () => {
+  const location = useLocation()
+  const { session } = useSessionState()
+  const token = session.token || ''
+  const { channels, isLoading, error } = useManagedChannels(token)
+  const {
+    reviewRequests,
+    isLoading: isReviewRequestsLoading,
+    error: reviewRequestsError,
+    refetch: refetchReviewRequests,
+  } = useMyReviewRequests(token)
+  const flashMessage = location.state?.message || ''
+  const [reviewActionState, setReviewActionState] = useState({ state: 'idle', message: '' })
+
+  const stats = useMemo(() => {
+    return [
+      { label: '我的频道', value: `${channels.length} 个` },
+      { label: '运行中', value: `${channels.filter((channel) => channel.lifecycleStatus === 'running').length} 个` },
+      { label: '自动部署', value: `${channels.filter((channel) => getChannelDeploymentMode(channel) === 'auto').length} 个` },
+      { label: '已接入 TG', value: `${channels.filter((channel) => Boolean(getChannelTgGroupId(channel))).length} 个` },
+      { label: '待审核请求', value: `${reviewRequests.filter((reviewRequest) => reviewRequest.status === 'pending').length} 条` },
+    ]
+  }, [channels, reviewRequests])
+
+  if (!token) {
+    return <LoginRequiredState title="我的频道" description="用户创建的频道列表和维护入口已经加上了，但这里是用户态接口，必须先登录。" />
+  }
+
+  const handleCancelReviewRequest = async (reviewRequestId) => {
+    setReviewActionState({ state: 'loading', message: '正在取消审核请求…' })
+    try {
+      await requestApi(
+        `/v1/review-requests/${encodeURIComponent(reviewRequestId)}/cancel`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        },
+        token,
+      )
+      await refetchReviewRequests()
+      setReviewActionState({ state: 'success', message: `审核请求 ${reviewRequestId} 已取消。` })
+    } catch (error) {
+      setReviewActionState({ state: 'error', message: error.message || '取消审核请求失败。' })
+    }
+  }
+
+  return (
+    <div className="detail">
+      <p className="eyebrow">Workspace</p>
+      <h1>我的频道</h1>
+      <p className="lead">
+        这里展示当前登录账号名下的频道。你可以直接进入维护页，查看部署配置、最近任务和 TG 探针状态。
+      </p>
+
+      <div className="stats">
+        {stats.map((metric) => (
+          <div key={metric.label}>
+            <p className="stat-value">{metric.value}</p>
+            <p className="stat-label">{metric.label}</p>
+          </div>
+        ))}
+      </div>
+
+      <section className="resources">
+        <div className="section-head section-head-tight">
+          <div>
+            <h2>我的审核请求</h2>
+            <p className="section-copy">创建频道并部署、申请加入频道，都会先沉淀到审核请求里。</p>
+          </div>
+        </div>
+        {reviewActionState.message && <p className={`auth-status ${reviewActionState.state}`}>{reviewActionState.message}</p>}
+        {isReviewRequestsLoading && <p className="panel-state">正在加载你的审核请求…</p>}
+        {!isReviewRequestsLoading && reviewRequestsError && <p className="panel-state error">{reviewRequestsError}</p>}
+        {!isReviewRequestsLoading && !reviewRequestsError && (
+          <ReviewRequestList
+            reviewRequests={reviewRequests}
+            emptyText="当前还没有提交过审核请求。"
+            actionSlot={(reviewRequest) => (
+              <div className="task-card-actions">
+                {reviewRequest.resultPayload?.channelId && (
+                  <Link to={`/me/channels/${reviewRequest.resultPayload.channelId}`}>查看频道</Link>
+                )}
+                {reviewRequest.status === 'pending' && (
+                  <button type="button" className="ghost" onClick={() => handleCancelReviewRequest(reviewRequest.id)}>
+                    取消申请
+                  </button>
+                )}
+              </div>
+            )}
+          />
+        )}
+      </section>
+
+      <section className="resources">
+        <div className="section-head section-head-tight">
+          <div>
+            <h2>频道列表</h2>
+            <p className="section-copy">当前列表来自 `GET /v1/me/channels`，只展示你自己有权限维护的频道。</p>
+          </div>
+          <div className="inline-actions">
+            <Link to="/me/channels/new">新建并部署</Link>
+          </div>
+        </div>
+        {!!flashMessage && <p className="auth-status success">{flashMessage}</p>}
+        {isLoading && <p className="panel-state">正在加载你的频道…</p>}
+        {!isLoading && error && <p className="panel-state error">{error}</p>}
+        {!isLoading && !error && channels.length === 0 && <p className="panel-state">当前账号下还没有频道。</p>}
+
+        {!isLoading && !error && channels.length > 0 && (
+          <div className="channel-list">
+            {channels.map((channel) => (
+              <div key={channel.id} className="channel-item">
+                <div>
+                  <p className="channel-title">{channel.name}</p>
+                  <p className="channel-desc">{summarizeChannel(channel)}</p>
+                  <p className="channel-meta">
+                    {formatStatus(channel.targetKind)} · {formatStatus(getChannelDeploymentMode(channel))} · {formatStatus(channel.lifecycleStatus)} · {formatStatus(channel.healthStatus)}
+                  </p>
+                  <p className="channel-meta">更新时间 · {formatDate(channel.updatedAt)}</p>
+                  {channel.currentTaskId && <p className="channel-meta">当前任务 · {channel.currentTaskId}</p>}
+                </div>
+                <div className="channel-actions">
+                  <Link to={`/me/channels/${channel.id}`}>维护频道</Link>
+                  <Link to={`/channels/${resolveChannelRouteId(channel)}`}>公开详情</Link>
+                  {getChannelPrimaryActionUrl(channel) && (
+                    <a href={getChannelPrimaryActionUrl(channel)} target="_blank" rel="noreferrer">
+                      {getChannelLinkLabel(channel)}
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
+const CreateManagedChannel = () => {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { session } = useSessionState()
+  const token = session.token || ''
+  const { workflows, isLoading: isWorkflowsLoading, error: workflowsError } = usePublicWorkflows()
+  const presetWorkflowId = new URLSearchParams(location.search).get('workflowId') || ''
+  const [form, setForm] = useState({
+    workflowId: presetWorkflowId || 'singularity-studio',
+    name: '',
+    slug: '',
+    summary: '',
+    descriptionPublic: '',
+    visibility: 'public',
+    applicationMode: 'open',
+    tags: '',
+  })
+  const [secretDrafts, setSecretDrafts] = useState({})
+  const [submitState, setSubmitState] = useState({ state: 'idle', message: '' })
+
+  const workflowOptions = useMemo(() => {
+    const options = Array.isArray(workflows)
+      ? workflows.map((workflow) => ({
+        id: workflow.id,
+        name: workflow.name || workflow.id,
+      }))
+      : []
+
+    if (!options.some((item) => item.id === 'singularity-studio')) {
+      options.unshift({
+        id: 'singularity-studio',
+        name: '奇点编辑部',
+      })
+    }
+
+    if (presetWorkflowId && !options.some((item) => item.id === presetWorkflowId)) {
+      options.unshift({
+        id: presetWorkflowId,
+        name: presetWorkflowId,
+      })
+    }
+
+    return options
+  }, [workflows, presetWorkflowId])
+  const selectedWorkflowId = form.workflowId || workflowOptions[0]?.id || ''
+
+  if (!token) {
+    return <LoginRequiredState title="新建频道并部署" description="这里走的是用户态创建与部署接口，必须先登录后才能提交频道表单。" />
+  }
+
+  const handleChange = (key, value) => {
+    setForm((current) => ({
+      ...current,
+      [key]: value,
+    }))
+  }
+
+  const handleSecretChange = (key, value) => {
+    setSecretDrafts((current) => ({
+      ...current,
+      [key]: value,
+    }))
+  }
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+    setSubmitState({ state: 'idle', message: '' })
+
+    const workflowId = String(selectedWorkflowId || '').trim()
+    const name = String(form.name || '').trim()
+    const slug = normalizeChannelSlug(form.slug)
+    const missingSecret = SECRET_FIELD_DEFINITIONS.find((field) => field.required !== false && !String(secretDrafts[field.key] || '').trim())
+
+    if (!workflowId) {
+      setSubmitState({ state: 'error', message: '请填写所属 workflowId。' })
+      return
+    }
+    if (!name) {
+      setSubmitState({ state: 'error', message: '请填写频道名称。' })
+      return
+    }
+    if (!slug) {
+      setSubmitState({ state: 'error', message: '请填写英文 slug，只能包含字母、数字和连字符。' })
+      return
+    }
+    if (missingSecret) {
+      setSubmitState({ state: 'error', message: `请填写${missingSecret.label}。` })
+      return
+    }
+
+    setSubmitState({ state: 'loading', message: '正在提交创建审核…' })
+
+    try {
+      const releaseName = buildReleaseName(slug)
+      const result = await requestApi(
+        '/v1/channels/deploy',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            channel: {
+              workflowId,
+              name,
+              slug,
+              summary: String(form.summary || '').trim() || undefined,
+              descriptionPublic: String(form.descriptionPublic || '').trim() || undefined,
+              visibility: form.visibility,
+              applicationMode: form.applicationMode,
+              tags: parseTagInput(form.tags),
+            },
+            deployment: {
+              targetKind: 'k8s',
+              request: {
+                releaseName,
+                secretEnv: buildSecretPatch(secretDrafts),
+              },
+            },
+          }),
+        },
+        token,
+      )
+
+      if (result?.reviewRequest?.id) {
+        navigate('/me/channels', {
+          state: {
+            message: `频道「${name}」的创建审核已提交（${result.reviewRequest.id}）。管理员通过后才会真正创建频道并触发首发部署。`,
+          },
+        })
+        return
+      }
+
+      if (result?.channel?.id) {
+        navigate(`/me/channels/${result.channel.id}`, {
+          state: {
+            message: `频道「${result?.channel?.name || name}」已创建，并已提交首发部署任务 ${result?.task?.taskId || ''}。`,
+          },
+        })
+        return
+      }
+
+      navigate('/me/channels', {
+        state: {
+          message: `频道「${name}」已提交，等待后端返回最终处理结果。`,
+        },
+      })
+    } catch (error) {
+      setSubmitState({ state: 'error', message: error.message || '提交创建审核失败。' })
+    }
+  }
+
+  return (
+    <div className="detail">
+      <p className="eyebrow">Workspace</p>
+      <h1>新建频道并部署</h1>
+      <p className="lead">
+        当前表单统一走 `POST /v1/channels/deploy`。普通用户提交后会先进入管理员审核，审核通过后才会真正创建频道并发起首发部署。
+      </p>
+
+      <section className="resources resource-panel">
+        <div className="section-head section-head-tight">
+          <div>
+            <h2>频道表单</h2>
+            <p className="section-copy">一个 workflow 下可以挂多个频道，所以这里需要显式选择 `workflowId`。频道展示名和内部部署 `releaseName` 分离；`releaseName` 会按 slug 自动生成全局唯一值。</p>
+            <p className="section-copy">当前只开放频道公开信息和首发部署密钥，镜像、Ingress、PVC 等部署参数继续走平台默认值。审核通过后，平台会按默认 k8s 配置首发部署。</p>
+            {!!workflowsError && <p className="section-copy">工作流目录暂时加载失败，当前先使用默认 workflow 选项。</p>}
+          </div>
+        </div>
+
+        <form id="create-channel-form" className="editor-grid channel-create-form" onSubmit={handleSubmit}>
+          <label className="editor-field">
+            <span>workflowId</span>
+            <select
+              value={selectedWorkflowId}
+              onChange={(event) => handleChange('workflowId', event.target.value)}
+              disabled={isWorkflowsLoading && workflowOptions.length === 0}
+            >
+              {!selectedWorkflowId && <option value="">请选择工作流</option>}
+              {workflowOptions.map((workflow) => (
+                <option key={workflow.id} value={workflow.id}>
+                  {workflow.name} ({workflow.id})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="editor-field">
+            <span>频道名称</span>
+            <input
+              type="text"
+              value={form.name}
+              onChange={(event) => handleChange('name', event.target.value)}
+              placeholder="例如 AI 科技"
+            />
+          </label>
+          <label className="editor-field">
+            <span>Slug</span>
+            <input
+              type="text"
+              value={form.slug}
+              onChange={(event) => handleChange('slug', event.target.value)}
+              placeholder="例如 ai-tech"
+            />
+          </label>
+          <label className="editor-field">
+            <span>申请模式</span>
+            <select value={form.applicationMode} onChange={(event) => handleChange('applicationMode', event.target.value)}>
+              <option value="open">开放加入</option>
+              <option value="review">需要审核</option>
+              <option value="closed">关闭申请</option>
+            </select>
+          </label>
+          <label className="editor-field">
+            <span>可见性</span>
+            <select value={form.visibility} onChange={(event) => handleChange('visibility', event.target.value)}>
+              <option value="public">公开</option>
+              <option value="unlisted">不公开</option>
+              <option value="private">私有</option>
+            </select>
+          </label>
+          <label className="editor-field editor-field-wide">
+            <span>频道简介</span>
+            <input
+              type="text"
+              value={form.summary}
+              onChange={(event) => handleChange('summary', event.target.value)}
+              placeholder="列表页短简介"
+            />
+          </label>
+          <label className="editor-field editor-field-wide">
+            <span>公开说明</span>
+            <textarea
+              value={form.descriptionPublic}
+              onChange={(event) => handleChange('descriptionPublic', event.target.value)}
+              placeholder="对外公开的详细描述"
+            />
+          </label>
+          <label className="editor-field editor-field-wide">
+            <span>标签（可选）</span>
+            <textarea
+              value={form.tags}
+              onChange={(event) => handleChange('tags', event.target.value)}
+              placeholder="用逗号或换行分隔，例如：transport:telegram, team:content"
+            />
+          </label>
+          <div className="editor-field editor-field-wide">
+            <span>首发部署密钥</span>
+            <div className="editor-grid secret-grid">
+              {SECRET_FIELD_DEFINITIONS.map((field) => (
+                <label key={field.key} className="editor-field">
+                  <span>{field.required === false ? `${field.label}（可选）` : field.label}</span>
+                  <input
+                    type="password"
+                    value={secretDrafts[field.key] || ''}
+                    onChange={(event) => handleSecretChange(field.key, event.target.value)}
+                    placeholder={field.kind === 'api' ? '请输入 API Key' : '请输入 Telegram Bot Token'}
+                    autoComplete="new-password"
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+        </form>
+
+        <div className="meta-grid create-channel-presets">
+          <div className="meta-card">
+            <p>部署方式</p>
+            <strong>自动部署</strong>
+          </div>
+          <div className="meta-card">
+            <p>目标类型</p>
+            <strong>Kubernetes</strong>
+          </div>
+          <div className="meta-card">
+            <p>首发部署</p>
+            <strong>审核通过后提交</strong>
+          </div>
+        </div>
+
+        {submitState.message && (
+          <p className={`auth-status ${submitState.state}`}>
+            {submitState.message}
+          </p>
+        )}
+
+        <div className="editor-actions">
+          <button form="create-channel-form" type="submit" className="primary" disabled={submitState.state === 'loading'}>
+            {submitState.state === 'loading' ? '提交审核中…' : '提交审核'}
+          </button>
+          <Link className="ghost" to="/me/channels">返回我的频道</Link>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+const ManagedTaskList = ({ tasks }) => {
+  if (!tasks.length) {
+    return <p className="panel-state">当前还没有部署任务记录。</p>
+  }
+
+  return (
+    <div className="task-list">
+      {tasks.map((task) => (
+        <article key={task.id} className="task-card">
+          <div className="task-card-head">
+            <div>
+              <p className="task-title">{formatStatus(task.taskType)}</p>
+              <p className="task-meta">{formatStatus(task.status)} · {formatDate(task.createdAt)}</p>
+            </div>
+            <span className="sub-chip">{formatStatus(task.status)}</span>
+          </div>
+          <p className="task-meta">任务 ID · {task.id}</p>
+          <p className="task-meta">目标资源 · {getDeployTaskResourceLabel(task)}</p>
+          {task.startedAt && <p className="task-meta">开始时间 · {formatDate(task.startedAt)}</p>}
+          {task.finishedAt && <p className="task-meta">完成时间 · {formatDate(task.finishedAt)}</p>}
+          {task.errorMessage && <p className="task-error">{task.errorMessage}</p>}
+        </article>
+      ))}
+    </div>
+  )
+}
+
+const MyChannelDetail = ({ channelId }) => {
+  const navigate = useNavigate()
+  const { session } = useSessionState()
+  const token = session.token || ''
+  const { channel, isLoading: isChannelLoading, error: channelError, refetch: refetchChannel } = useManagedChannel(channelId, token)
+  const { config, isLoading: isConfigLoading, error: configError, refetch: refetchConfig } = useManagedChannelDeployConfig(channelId, token)
+  const { tasks, isLoading: isTasksLoading, error: tasksError, refetch: refetchTasks } = useManagedChannelTasks(channelId, token)
+  const {
+    reviewRequests: joinReviewRequests,
+    isLoading: isJoinReviewRequestsLoading,
+    error: joinReviewRequestsError,
+    refetch: refetchJoinReviewRequests,
+  } = useManagedChannelJoinRequests(channelId, token)
+  const {
+    memberships,
+    isLoading: isMembershipsLoading,
+    error: membershipsError,
+    refetch: refetchMemberships,
+  } = useManagedChannelMembers(channelId, token)
+  const [isEditingConfig, setIsEditingConfig] = useState(false)
+  const [secretDrafts, setSecretDrafts] = useState({})
+  const [submitState, setSubmitState] = useState({ state: 'idle', message: '' })
+  const [actionState, setActionState] = useState({ state: 'idle', message: '' })
+  const [reviewActionState, setReviewActionState] = useState({ state: 'idle', message: '' })
+  const [pendingTaskId, setPendingTaskId] = useState('')
+  const bootstrapRequest = resolveBootstrapRequest(channel, config, tasks)
+  const selectedTargetKind = config?.targetKind || channel?.targetKind || 'k8s'
+  const k8sRedeployReleaseName = String(channel?.releaseName || bootstrapRequest.releaseName || '').trim()
+  const k8sRedeployNamespace = String(channel?.namespace || bootstrapRequest.namespace || '').trim()
+  const supportsK8sRedeploy = selectedTargetKind === 'k8s' && getChannelDeploymentMode(channel) === 'auto' && Boolean(k8sRedeployReleaseName)
+  const activeTask = useMemo(
+    () => resolveActiveChannelTask(tasks, channel?.currentTaskId),
+    [tasks, channel?.currentTaskId],
+  )
+  const pendingTask = useMemo(() => {
+    if (!pendingTaskId) {
+      return null
+    }
+    return tasks.find((task) => task?.id === pendingTaskId) || { id: pendingTaskId, status: 'accepted' }
+  }, [tasks, pendingTaskId])
+  const hasLifecycleTransition = ['provisioning', 'deleting'].includes(String(channel?.lifecycleStatus || '').trim())
+  const blockingTask = useMemo(() => {
+    if (pendingTaskId && (!pendingTask || isActiveDeployTaskStatus(pendingTask.status))) {
+      return pendingTask
+    }
+    return activeTask
+  }, [activeTask, pendingTask, pendingTaskId])
+  const hasActiveOperation = Boolean(blockingTask) || hasLifecycleTransition
+
+  useEffect(() => {
+    if (!pendingTaskId) {
+      return
+    }
+    const matchedTask = tasks.find((task) => task?.id === pendingTaskId)
+    if (matchedTask && !isActiveDeployTaskStatus(matchedTask.status)) {
+      setPendingTaskId('')
+    }
+  }, [pendingTaskId, tasks])
+
+  useEffect(() => {
+    if (!token || !hasActiveOperation) {
+      return
+    }
+    const timer = window.setInterval(() => {
+      void refetchChannel()
+      void refetchConfig()
+      void refetchTasks()
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [token, hasActiveOperation, refetchChannel, refetchConfig, refetchTasks])
+
+  if (!token) {
+    return <LoginRequiredState title="频道维护" description="维护页已经加上了，但这里走的是 owner 权限接口，必须先登录。" />
+  }
+
+  if (isChannelLoading) {
+    return (
+      <div className="detail">
+        <p className="eyebrow">Manage</p>
+        <h1>加载维护页中</h1>
+        <p className="lead">正在读取用户频道详情、部署配置和最近任务。</p>
+      </div>
+    )
+  }
+
+  if (channelError || !channel) {
+    return (
+      <div className="detail">
+        <p className="eyebrow">Manage</p>
+        <h1>频道维护页加载失败</h1>
+        <p className="lead">{channelError || '未找到该频道，或当前账号没有访问权限。'}</p>
+        <Link className="primary" to="/me/channels">返回我的频道</Link>
+      </div>
+    )
+  }
+
+  const configSummary = config ? [
+    { label: '部署目标', value: formatStatus(config.targetKind) },
+    { label: '最近应用任务', value: config.lastAppliedTaskId || '未记录' },
+    { label: '包含密钥环境变量', value: config.hasSecretEnv ? '是' : '否' },
+    { label: '配置更新时间', value: formatDate(config.updatedAt) },
+  ] : []
+
+  const managedMetadata = [
+    { label: '频道 ID', value: channel.id },
+    { label: 'Slug', value: channel.slug },
+    { label: 'Owner', value: channel.owner?.name || '未知' },
+    { label: '命名空间', value: channel.namespace || '未绑定' },
+    { label: 'Release Name', value: channel.releaseName || '未绑定' },
+    { label: 'Resource Key', value: channel.resourceKey || '未绑定' },
+    { label: '当前任务', value: channel.currentTaskId || '无' },
+    { label: 'TG 群 ID', value: getChannelTgGroupId(channel) || '未探测到' },
+  ]
+  const canBootstrapConfig = Object.keys(bootstrapRequest).length > 0
+  const secretFieldStates = buildSecretFieldStates(config?.secretEnvKeys || [])
+  const activeOperationTaskId = String(blockingTask?.id || channel?.currentTaskId || '').trim()
+  const activeOperationStatus = blockingTask?.status || (hasLifecycleTransition ? channel?.lifecycleStatus : '')
+  const activeOperationMessage = hasActiveOperation
+    ? `当前任务 ${activeOperationTaskId || '处理中'} 处于${formatStatus(activeOperationStatus)}状态，完成前暂时不能重复操作。`
+    : ''
+
+  const handleBeginEdit = () => {
+    setSecretDrafts({})
+    setSubmitState({ state: 'idle', message: '' })
+    setActionState({ state: 'idle', message: '' })
+    setIsEditingConfig(true)
+  }
+
+  const handleCancelEdit = () => {
+    setIsEditingConfig(false)
+    setSecretDrafts({})
+  }
+
+  const handleSecretDraftChange = (key, value) => {
+    setSecretDrafts((current) => ({
+      ...current,
+      [key]: value,
+    }))
+  }
+
+  const handleSubmitPatch = async () => {
+    if (hasActiveOperation) {
+      setSubmitState({ state: 'error', message: activeOperationMessage })
+      return
+    }
+
+    setSubmitState({ state: 'loading', message: '正在保存配置并发布…' })
+
+    try {
+      const secretPatch = buildSecretPatch(secretDrafts)
+      const hasSecretPatch = Object.keys(secretPatch).length > 0
+
+      if (!hasSecretPatch) {
+        throw new Error('请至少填写一个 API Key 或 Bot Token。')
+      }
+
+      let requestPayload = { secretEnv: secretPatch }
+
+      if (!config) {
+        if (!canBootstrapConfig) {
+          throw new Error('当前无法从实例推导出基础配置，请补充部署配置后再保存。')
+        }
+        requestPayload = mergeRequestPatch(bootstrapRequest, requestPayload)
+      }
+
+      const result = await requestApi(
+        `/v1/channels/${encodeURIComponent(channel.id)}/deployment-config`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            targetKind: selectedTargetKind,
+            request: requestPayload,
+          }),
+        },
+        token,
+      )
+
+      const nextTaskId = String(result?.task?.taskId || result?.task?.id || '').trim()
+      if (nextTaskId) {
+        setPendingTaskId(nextTaskId)
+      }
+      await Promise.all([
+        refetchChannel(),
+        refetchConfig(),
+        refetchTasks(),
+      ])
+      setSubmitState({ state: 'success', message: buildTaskSuccessMessage(result?.task) })
+      setIsEditingConfig(false)
+    } catch (error) {
+      setSubmitState({ state: 'error', message: error.message || '提交失败。' })
+    }
+  }
+
+  const handleRedeploy = async () => {
+    if (hasActiveOperation) {
+      setActionState({ state: 'error', message: activeOperationMessage })
+      return
+    }
+
+    if (!supportsK8sRedeploy) {
+      setActionState({ state: 'error', message: '当前频道没有可用于重新部署的 releaseName。' })
+      return
+    }
+
+    if (!config) {
+      setActionState({ state: 'error', message: '当前没有可复用的持久化配置，先补建配置后才能重新部署。' })
+      return
+    }
+
+    setActionState({ state: 'loading', message: '正在提交重新部署任务…' })
+
+    try {
+      const result = await requestApi(
+        '/v1/deepflow/k8s/redeploy',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              channelId: channel.id,
+              releaseName: k8sRedeployReleaseName,
+              namespace: k8sRedeployNamespace || undefined,
+              skipPersistChannelConfig: true,
+            }),
+          },
+          token,
+        )
+
+      const nextTaskId = String(result?.taskId || result?.task?.taskId || result?.task?.id || '').trim()
+      if (nextTaskId) {
+        setPendingTaskId(nextTaskId)
+      }
+      await Promise.all([
+        refetchChannel(),
+        refetchConfig(),
+        refetchTasks(),
+      ])
+      setActionState({ state: 'success', message: buildTaskSuccessMessage(result) })
+    } catch (error) {
+      setActionState({ state: 'error', message: error.message || '重新部署失败。' })
+    }
+  }
+
+  const handleDeepRedeploy = async () => {
+    if (hasActiveOperation) {
+      setActionState({ state: 'error', message: activeOperationMessage })
+      return
+    }
+
+    if (!supportsK8sRedeploy) {
+      setActionState({ state: 'error', message: '当前频道没有可用于深度重新部署的 releaseName。' })
+      return
+    }
+
+    if (!config) {
+      setActionState({ state: 'error', message: '当前没有可复用的持久化配置，先补建配置后才能深度重新部署。' })
+      return
+    }
+
+    setActionState({ state: 'loading', message: '正在提交深度重新部署任务…' })
+
+    try {
+      const result = await requestApi(
+        '/v1/deepflow/k8s/deep-redeploy',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              channelId: channel.id,
+              releaseName: k8sRedeployReleaseName,
+              namespace: k8sRedeployNamespace || undefined,
+              skipPersistChannelConfig: true,
+            }),
+          },
+          token,
+        )
+
+      const nextTaskId = String(result?.taskId || result?.task?.taskId || result?.task?.id || '').trim()
+      if (nextTaskId) {
+        setPendingTaskId(nextTaskId)
+      }
+      await Promise.all([
+        refetchChannel(),
+        refetchConfig(),
+        refetchTasks(),
+      ])
+      setActionState({ state: 'success', message: buildTaskSuccessMessage(result) })
+    } catch (error) {
+      setActionState({ state: 'error', message: error.message || '深度重新部署失败。' })
+    }
+  }
+
+  const handleDestroyChannel = async () => {
+    if (hasActiveOperation) {
+      setActionState({ state: 'error', message: activeOperationMessage })
+      return
+    }
+
+    const confirmed = window.confirm(`确认删除频道「${channel.name}」？这个操作会删除实例和频道数据，不能恢复。`)
+    if (!confirmed) {
+      return
+    }
+
+    setActionState({ state: 'loading', message: '正在删除频道…' })
+
+    try {
+      await requestApi(
+        `/v1/channels/${encodeURIComponent(channel.id)}/destroy`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        },
+        token,
+      )
+
+      navigate('/me/channels', {
+        state: {
+          message: `频道「${channel.name}」已删除。`,
+        },
+      })
+    } catch (error) {
+      setActionState({ state: 'error', message: error.message || '删除频道失败。' })
+    }
+  }
+
+  const handleReviewDecision = async (reviewRequestId, decision) => {
+    setReviewActionState({
+      state: 'loading',
+      message: decision === 'approve' ? '正在通过加入申请…' : '正在驳回加入申请…',
+    })
+
+    try {
+      await requestApi(
+        `/v1/review-requests/${encodeURIComponent(reviewRequestId)}/${decision}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        },
+        token,
+      )
+      await Promise.all([
+        refetchJoinReviewRequests(),
+        refetchMemberships(),
+        refetchChannel(),
+      ])
+      setReviewActionState({
+        state: 'success',
+        message: decision === 'approve' ? `加入申请 ${reviewRequestId} 已通过。` : `加入申请 ${reviewRequestId} 已驳回。`,
+      })
+    } catch (error) {
+      setReviewActionState({ state: 'error', message: error.message || '处理加入审核失败。' })
+    }
+  }
+
+  const canRedeploy = supportsK8sRedeploy && Boolean(config)
+  const isActionPending = actionState.state === 'loading'
+  const isOperationLocked = isActionPending || hasActiveOperation
+
+  return (
+    <div className="detail">
+      <p className="eyebrow">Manage</p>
+      <h1>{channel.name}</h1>
+      <p className="lead">{channel.descriptionPublic || summarizeChannel(channel)}</p>
+
+      <div className="stats">
+        <div>
+          <p className="stat-value">{formatStatus(channel.lifecycleStatus)}</p>
+          <p className="stat-label">运行状态</p>
+        </div>
+        <div>
+          <p className="stat-value">{formatStatus(channel.healthStatus)}</p>
+          <p className="stat-label">健康状态</p>
+        </div>
+        <div>
+          <p className="stat-value">{formatStatus(getChannelDeploymentMode(channel))}</p>
+          <p className="stat-label">部署方式</p>
+        </div>
+        <div>
+          <p className="stat-value">{formatStatus(channel.targetKind)}</p>
+          <p className="stat-label">部署目标</p>
+        </div>
+      </div>
+
+      <section className="resources">
+        <div className="section-head section-head-tight">
+          <div>
+            <h2>维护入口</h2>
+            <p className="section-copy">这里走的是 owner 视角接口：频道详情、部署配置、任务记录都来自登录态接口。</p>
+          </div>
+          <div className="inline-actions">
+            <Link to={`/channels/${resolveChannelRouteId(channel)}`}>公开详情</Link>
+            {getChannelPrimaryActionUrl(channel) && (
+              <a href={getChannelPrimaryActionUrl(channel)} target="_blank" rel="noreferrer">
+                {getChannelLinkLabel(channel)}
+              </a>
+            )}
+          </div>
+        </div>
+        <div className="resource-stack">
+          <p className="guide-title">运维动作</p>
+          <div className="action-fields">
+            <div className="action-field">
+              <div>
+                <p className="action-label">重新部署</p>
+                <p className="action-copy">
+                  重新跑一遍
+                  {' '}
+                  <code>helm upgrade --install</code>
+                  ，然后等待
+                  {' '}
+                  <code>kubectl rollout status</code>
+                  。
+                </p>
+              </div>
+              <button type="button" className="ghost" onClick={handleRedeploy} disabled={!canRedeploy || isOperationLocked}>
+                重新部署
+              </button>
+            </div>
+            {supportsK8sRedeploy && (
+              <div className="action-field">
+                <div>
+                  <p className="action-label">深度重新部署</p>
+                  <p className="action-copy">
+                    先跑
+                    {' '}
+                    <code>helm upgrade --install</code>
+                    ，再执行
+                    {' '}
+                    <code>kubectl rollout restart deployment/&lt;release&gt;</code>
+                    {' '}
+                    和
+                    {' '}
+                    <code>kubectl rollout status</code>
+                    。
+                  </p>
+                </div>
+                <button type="button" className="ghost" onClick={handleDeepRedeploy} disabled={!canRedeploy || isOperationLocked}>
+                  深度重新部署
+                </button>
+              </div>
+            )}
+            <div className="action-field action-field-danger">
+              <div>
+                <p className="action-label">删除频道</p>
+                <p className="action-copy">删除实例和频道记录。这个操作不可恢复。</p>
+              </div>
+              <button type="button" className="ghost danger" onClick={handleDestroyChannel} disabled={isOperationLocked}>
+                删除频道
+              </button>
+            </div>
+          </div>
+          {!supportsK8sRedeploy && <p className="section-copy">这条频道还没有可复用的 releaseName，暂时不能直接重新部署。</p>}
+          {supportsK8sRedeploy && !config && <p className="section-copy">这条频道还没有持久化部署配置，k8s 重部署暂时缺少可复用的密钥配置。</p>}
+          {!!activeOperationMessage && <p className="section-copy">{activeOperationMessage}</p>}
+          {!!actionState.message && !isEditingConfig && (
+            <p className={`auth-status ${actionState.state === 'error' ? 'error' : actionState.state === 'success' ? 'success' : 'loading'}`}>
+              {actionState.message}
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="resources resource-panel">
+        <h2>频道元数据</h2>
+        <div className="meta-grid">
+          {managedMetadata.map((item) => (
+            <div key={item.label} className="meta-card">
+              <p>{item.label}</p>
+              <strong>{formatValue(item.value)}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="resources resource-panel">
+        <div className="section-head section-head-tight">
+          <div>
+            <h2>加入审核</h2>
+            <p className="section-copy">如果这个频道选择了“需要审核”，新的加入请求会在这里由频道 owner 处理。</p>
+          </div>
+        </div>
+        {reviewActionState.message && <p className={`auth-status ${reviewActionState.state}`}>{reviewActionState.message}</p>}
+        {isJoinReviewRequestsLoading && <p className="panel-state">正在加载待审核加入请求…</p>}
+        {!isJoinReviewRequestsLoading && joinReviewRequestsError && <p className="panel-state error">{joinReviewRequestsError}</p>}
+        {!isJoinReviewRequestsLoading && !joinReviewRequestsError && (
+          <ReviewRequestList
+            reviewRequests={joinReviewRequests}
+            emptyText="当前没有待审核的加入请求。"
+            actionSlot={(reviewRequest) => (
+              <div className="task-card-actions">
+                <button type="button" className="ghost" onClick={() => handleReviewDecision(reviewRequest.id, 'approve')}>
+                  通过
+                </button>
+                <button type="button" className="ghost danger" onClick={() => handleReviewDecision(reviewRequest.id, 'reject')}>
+                  驳回
+                </button>
+              </div>
+            )}
+          />
+        )}
+      </section>
+
+      <section className="resources resource-panel">
+        <div className="section-head section-head-tight">
+          <div>
+            <h2>频道成员</h2>
+            <p className="section-copy">这里展示已经通过审核、可以看到群入口的用户。</p>
+          </div>
+        </div>
+        {isMembershipsLoading && <p className="panel-state">正在加载频道成员…</p>}
+        {!isMembershipsLoading && membershipsError && <p className="panel-state error">{membershipsError}</p>}
+        {!isMembershipsLoading && !membershipsError && memberships.length === 0 && <p className="panel-state">当前还没有已批准成员。</p>}
+        {!isMembershipsLoading && !membershipsError && memberships.length > 0 && (
+          <div className="meta-grid">
+            {memberships.map((membership) => (
+              <div key={membership.id} className="meta-card">
+                <p>{membership.userName}</p>
+                <strong>{membership.userId}</strong>
+                <p className="meta-footnote">批准时间 · {formatDate(membership.approvedAt)}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="resources resource-panel">
+        <div className="section-head section-head-tight">
+          <div>
+            <h2>当前部署配置</h2>
+            <p className="section-copy">当前用户侧只开放 API Key 和 Bot Token 的维护，不开放镜像、域名、PVC 这类部署参数。</p>
+          </div>
+        </div>
+        {isConfigLoading && <p className="panel-state">正在加载部署配置…</p>}
+        {!isConfigLoading && configError && <p className="panel-state error">{configError}</p>}
+        {!isConfigLoading && !configError && !config && (
+          <p className="panel-state">
+            当前还没有持久化的部署配置。
+            {canBootstrapConfig ? ' 首次保存时会基于最近一次部署请求补建配置记录。' : ' 当前也还没有可用于补建的基础请求快照。'}
+          </p>
+        )}
+
+        {!isConfigLoading && !configError && config && (
+          <>
+            <div className="meta-grid">
+              {configSummary.map((item) => (
+                <div key={item.label} className="meta-card">
+                  <p>{item.label}</p>
+                  <strong>{formatValue(item.value)}</strong>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        <div className="resource-stack resource-subpanel">
+          <div className="section-head section-head-tight">
+            <div>
+              <p className="guide-title">密钥配置状态</p>
+              <p className="section-copy">这里只维护 API Key 和 Bot Token。</p>
+            </div>
+            {!isConfigLoading && !configError && (
+              <div className="inline-actions">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={handleBeginEdit}
+                  disabled={(!config && isTasksLoading) || hasActiveOperation}
+                >
+                  {config ? '编辑密钥' : '补建配置并编辑密钥'}
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="meta-grid">
+            {secretFieldStates.map((field) => (
+              <div key={field.key} className="meta-card">
+                <p>{field.label}</p>
+                <strong>{field.configured ? '已配置' : '未配置'}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {submitState.message && !isEditingConfig && (
+          <p className={`auth-status ${submitState.state}`}>
+            {submitState.message}
+          </p>
+        )}
+
+        {isEditingConfig && (
+          <div className="editor-panel">
+            <div className="section-head section-head-tight">
+              <div>
+                <h2>编辑密钥</h2>
+                <p className="section-copy">保存后会调用更新配置接口，并立即触发一次新的发布任务。</p>
+              </div>
+              <div className="editor-toolbar">
+                <button type="button" className="ghost" onClick={handleCancelEdit}>
+                  取消编辑
+                </button>
+                <button type="button" className="ghost" onClick={handleBeginEdit}>
+                  重置为当前配置
+                </button>
+              </div>
+            </div>
+
+            <p className="panel-state">
+              `secretEnv` 的真实值不会从后端返回。下面开放给用户直接配置 `API Key` 和 `Bot Token`，
+              留空表示这次不修改该密钥。
+            </p>
+
+            <div className="secret-grid">
+              {secretFieldStates.map((field) => (
+                <label key={field.key} className="editor-field">
+                  <span>{field.label}</span>
+                  <input
+                    type="password"
+                    value={secretDrafts[field.key] || ''}
+                    onChange={(event) => handleSecretDraftChange(field.key, event.target.value)}
+                    placeholder={field.configured ? '已配置，留空表示不修改' : '留空表示暂不设置'}
+                    autoComplete="off"
+                  />
+                </label>
+              ))}
+            </div>
+
+            {submitState.message && (
+              <p className={`auth-status ${submitState.state}`}>
+                {submitState.message}
+              </p>
+            )}
+
+            <div className="editor-actions">
+              <button type="button" className="primary" onClick={handleSubmitPatch} disabled={submitState.state === 'loading' || hasActiveOperation}>
+                {submitState.state === 'loading' ? '保存中…' : '保存配置并发布'}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="resources">
+        <h2>最近任务</h2>
+        {isTasksLoading && <p className="panel-state">正在加载最近任务…</p>}
+        {!isTasksLoading && tasksError && <p className="panel-state error">{tasksError}</p>}
+        {!isTasksLoading && !tasksError && <ManagedTaskList tasks={tasks} />}
+      </section>
+
+      <Link className="primary" to="/me/channels">返回我的频道</Link>
+    </div>
+  )
+}
+
+const ManagedChannelDetailRoute = () => {
+  const { channelId } = useParams()
+  return <MyChannelDetail key={channelId || 'unknown-channel'} channelId={channelId || ''} />
+}
+
+const AdminLogin = () => {
+  const navigate = useNavigate()
+  const { adminSession, setAdminSession } = useSessionState()
+  const [form, setForm] = useState({ username: '', password: '' })
+  const [status, setStatus] = useState({ state: 'idle', message: '' })
+
+  useEffect(() => {
+    if (adminSession.token) {
+      navigate('/admin/review-requests', { replace: true })
+    }
+  }, [adminSession.token, navigate])
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+    setStatus({ state: 'loading', message: '正在登录管理端…' })
+
+    try {
+      const result = await requestApi('/v1/admin/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: String(form.username || '').trim(),
+          password: String(form.password || ''),
+        }),
+      })
+
+      setAdminSession({
+        token: result?.accessToken || '',
+        adminId: result?.admin?.id || '',
+        username: result?.admin?.username || '',
+        role: result?.admin?.role || '',
+        expiresAt: result?.expiresAt || '',
+      })
+      navigate('/admin/review-requests', { replace: true })
+    } catch (error) {
+      setStatus({ state: 'error', message: error.message || '管理员登录失败。' })
+    }
+  }
+
+  return (
+    <div className="detail admin-auth">
+      <p className="eyebrow">Admin</p>
+      <h1>管理员登录</h1>
+      <p className="lead">这里走账号密码登录，用于审核“创建频道并部署”这类管理员审批请求。</p>
+
+      <section className="resources resource-panel">
+        <form id="admin-login-form" className="editor-grid channel-create-form" onSubmit={handleSubmit}>
+          <label className="editor-field">
+            <span>用户名</span>
+            <input
+              type="text"
+              value={form.username}
+              onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
+              placeholder="admin username"
+              autoComplete="username"
+            />
+          </label>
+          <label className="editor-field">
+            <span>密码</span>
+            <input
+              type="password"
+              value={form.password}
+              onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+              placeholder="admin password"
+              autoComplete="current-password"
+            />
+          </label>
+        </form>
+
+        {status.message && <p className={`auth-status ${status.state}`}>{status.message}</p>}
+
+        <div className="editor-actions">
+          <button type="submit" form="admin-login-form" className="primary" disabled={status.state === 'loading'}>
+            {status.state === 'loading' ? '登录中…' : '登录管理端'}
+          </button>
+          <Link className="ghost" to="/">返回工作流</Link>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+const AdminReviewRequests = () => {
+  const { adminSession } = useSessionState()
+  const token = adminSession.token || ''
+  const [statusFilter, setStatusFilter] = useState('pending')
+  const [actionState, setActionState] = useState({ state: 'idle', message: '' })
+  const {
+    reviewRequests,
+    isLoading,
+    error,
+    refetch,
+  } = useAdminReviewRequests(token, { requestType: 'channel_create', status: statusFilter })
+
+  if (!token) {
+    return (
+      <LoginRequiredState
+        title="管理员审核后台"
+        description="请先用管理员账号密码登录，然后再进入审核后台。"
+      />
+    )
+  }
+
+  const handleDecision = async (reviewRequestId, decision) => {
+    setActionState({
+      state: 'loading',
+      message: decision === 'approve' ? '正在通过创建审核…' : '正在驳回创建审核…',
+    })
+    try {
+      await requestApi(
+        `/v1/review-requests/${encodeURIComponent(reviewRequestId)}/${decision}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        },
+        token,
+      )
+      await refetch()
+      setActionState({
+        state: 'success',
+        message: decision === 'approve' ? `创建审核 ${reviewRequestId} 已通过。` : `创建审核 ${reviewRequestId} 已驳回。`,
+      })
+    } catch (requestError) {
+      setActionState({ state: 'error', message: requestError.message || '处理创建审核失败。' })
+    }
+  }
+
+  return (
+    <div className="detail">
+      <p className="eyebrow">Admin</p>
+      <h1>管理员审核后台</h1>
+      <p className="lead">这里集中处理“创建频道并部署”的管理员审核。通过后，系统才会真正创建频道并发起首发部署。</p>
+
+      <section className="resources resource-panel">
+        <div className="section-head section-head-tight">
+          <div>
+            <h2>创建审核队列</h2>
+            <p className="section-copy">当前只展示 `channel_create` 审核请求。</p>
+          </div>
+          <div className="inline-actions">
+            <button type="button" className={statusFilter === 'pending' ? 'active-filter' : ''} onClick={() => setStatusFilter('pending')}>
+              待审核
+            </button>
+            <button type="button" className={statusFilter === '' ? 'active-filter' : ''} onClick={() => setStatusFilter('')}>
+              全部
+            </button>
+          </div>
+        </div>
+
+        {actionState.message && <p className={`auth-status ${actionState.state}`}>{actionState.message}</p>}
+        {isLoading && <p className="panel-state">正在加载管理员审核请求…</p>}
+        {!isLoading && error && <p className="panel-state error">{error}</p>}
+        {!isLoading && !error && (
+          <ReviewRequestList
+            reviewRequests={reviewRequests}
+            emptyText="当前没有待处理的创建审核请求。"
+            actionSlot={(reviewRequest) => {
+              const channelPayload = reviewRequest.requestPayload?.channel || {}
+              const deploymentPayload = reviewRequest.requestPayload?.deployment || {}
+              const deploymentRequest = deploymentPayload?.request || {}
+              return (
+                <>
+                  <div className="meta-grid compact-meta-grid">
+                    <div className="meta-card">
+                      <p>频道名</p>
+                      <strong>{channelPayload.name || '未配置'}</strong>
+                    </div>
+                    <div className="meta-card">
+                      <p>Slug</p>
+                      <strong>{channelPayload.slug || reviewRequest.subjectKey || '未配置'}</strong>
+                    </div>
+                    <div className="meta-card">
+                      <p>Workflow</p>
+                      <strong>{reviewRequest.workflowId || '未配置'}</strong>
+                    </div>
+                    <div className="meta-card">
+                      <p>可见性 / 加入策略</p>
+                      <strong>{formatStatus(channelPayload.visibility)} / {formatStatus(channelPayload.applicationMode)}</strong>
+                    </div>
+                    <div className="meta-card">
+                      <p>Release Name</p>
+                      <strong>{deploymentRequest.releaseName || '未配置'}</strong>
+                    </div>
+                    <div className="meta-card">
+                      <p>密钥字段</p>
+                      <strong>{Array.isArray(reviewRequest.secretEnvKeys) && reviewRequest.secretEnvKeys.length ? reviewRequest.secretEnvKeys.join(', ') : '无'}</strong>
+                    </div>
+                  </div>
+                  {reviewRequest.status === 'pending' && (
+                    <div className="task-card-actions">
+                      <button type="button" className="ghost" onClick={() => handleDecision(reviewRequest.id, 'approve')}>
+                        通过并创建部署
+                      </button>
+                      <button type="button" className="ghost danger" onClick={() => handleDecision(reviewRequest.id, 'reject')}>
+                        驳回
+                      </button>
+                    </div>
+                  )}
+                </>
+              )
+            }}
+          />
+        )}
+      </section>
+    </div>
+  )
+}
 
 const HeaderAuthControl = () => {
-  const [session, setSession] = useState(() => {
-    try {
-      const stored = localStorage.getItem(SESSION_KEY)
-      return stored ? { ...INITIAL_SESSION, ...JSON.parse(stored) } : INITIAL_SESSION
-    } catch {
-      return INITIAL_SESSION
-    }
-  })
+  const { session, adminSession, setSession, setAdminSession } = useSessionState()
   const [status, setStatus] = useState({ state: 'idle', message: '' })
-  const [hasFetchedProfile, setHasFetchedProfile] = useState(false)
+  const [hasFetchedProfile, setHasFetchedProfile] = useState(Boolean(session.profileName))
 
   const { address, isConnected } = useAccount()
   const { connect, connectors, status: connectStatus, error: connectError, variables: connectVariables } = useConnect()
   const { disconnect } = useDisconnect()
-  const { signMessageAsync, status: signStatus } = useSignMessage()
+  const { signMessageAsync } = useSignMessage()
 
   const normalizedAddress = address?.toLowerCase() || ''
-
-  useEffect(() => {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session))
-  }, [session])
 
   const fetchNonce = async (walletAddress) => {
     const response = await fetch(LOGIN_ENDPOINT, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         query: GET_NONCE_QUERY,
         operationName: 'getNonce',
-        variables: { address: walletAddress }
-      })
+        variables: { address: walletAddress },
+      }),
     })
 
     if (!response.ok) {
@@ -288,7 +2691,7 @@ const HeaderAuthControl = () => {
     return nonce
   }
 
-  const fetchProfile = async (userId, token, silent = false) => {
+  const fetchProfile = useCallback(async (userId, token, silent = false) => {
     if (!silent) {
       setStatus({ state: 'loading', message: '拉取用户信息…' })
     }
@@ -298,13 +2701,13 @@ const HeaderAuthControl = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           query: PROFILE_QUERY,
           operationName: 'getUserDetail',
-          variables: { id: String(userId) }
-        })
+          variables: { id: String(userId) },
+        }),
       })
 
       if (!response.ok) {
@@ -315,7 +2718,7 @@ const HeaderAuthControl = () => {
       const detail = result?.data?.getUserDetail?.data
 
       if (detail?.name) {
-        setSession(prev => ({ ...prev, profileName: detail.name, token, userId }))
+        setSession((prev) => ({ ...prev, profileName: detail.name, token, userId }))
         setStatus({ state: 'success', message: '登录完成，可调用工作流。' })
       } else {
         const firstError = result?.errors?.[0]?.message || '未返回用户信息。'
@@ -324,14 +2727,21 @@ const HeaderAuthControl = () => {
     } catch (error) {
       setStatus({ state: 'error', message: error.message || '拉取用户信息失败。' })
     }
-  }
+  }, [setSession])
 
   useEffect(() => {
-    if (session.token && session.userId && !hasFetchedProfile) {
+    if (!session.token || !session.userId) {
+      setHasFetchedProfile(false)
+      return
+    }
+    if (session.profileName) {
+      setHasFetchedProfile(true)
+      return
+    }
+    if (!hasFetchedProfile) {
       fetchProfile(session.userId, session.token, true).finally(() => setHasFetchedProfile(true))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.token, session.userId])
+  }, [fetchProfile, hasFetchedProfile, session.profileName, session.token, session.userId])
 
   const handleLoginFlow = async () => {
     if (!isConnected || !normalizedAddress) {
@@ -342,27 +2752,24 @@ const HeaderAuthControl = () => {
     setStatus({ state: 'loading', message: '唤起钱包签名…' })
     try {
       const nonce = await fetchNonce(normalizedAddress)
-      //Sign this message to authenticate your wallet address \nNonce: a6154976-698d-4b5e-98b4-79ab9e9da96d\nAddress: 0xd4F8bbF9c0B8AFF6D76d2C5Fa4971a36fC9e4003
       const message = `Sign this message to authenticate your wallet address \nNonce: ${nonce}\nAddress: ${normalizedAddress}`
       const signature = await signMessageAsync({ message })
-
-      const payload = {
-        query: LOGIN_QUERY,
-        operationName: 'login',
-        variables: {
-          req: {
-            ethAddress: normalizedAddress,
-            signature
-          }
-        }
-      }
 
       const response = await fetch(LOGIN_ENDPOINT, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          query: LOGIN_QUERY,
+          operationName: 'login',
+          variables: {
+            req: {
+              ethAddress: normalizedAddress,
+              signature,
+            },
+          },
+        }),
       })
 
       if (!response.ok) {
@@ -399,7 +2806,6 @@ const HeaderAuthControl = () => {
 
     if (!session.token) {
       handleLoginFlow()
-      return
     }
   }
 
@@ -408,6 +2814,10 @@ const HeaderAuthControl = () => {
     setSession(INITIAL_SESSION)
     setStatus({ state: 'idle', message: '已退出登录。' })
     setHasFetchedProfile(false)
+  }
+
+  const handleAdminLogout = () => {
+    setAdminSession(INITIAL_ADMIN_SESSION)
   }
 
   const primaryMode = !isConnected ? 'connect' : session.token ? 'profile' : 'login'
@@ -436,6 +2846,16 @@ const HeaderAuthControl = () => {
           </button>
         </div>
       )}
+      {adminSession.token && (
+        <div className="session-actions admin-session-actions">
+          <Link className="ghost" to="/admin/review-requests">
+            管理员：{adminSession.username || '已登录'}
+          </Link>
+          <button type="button" className="ghost" onClick={handleAdminLogout}>
+            退出管理端
+          </button>
+        </div>
+      )}
       {!isConnected && connectors.length > 1 && (
         <div className="connector-list">
           {connectors.map((connector) => (
@@ -456,6 +2876,7 @@ const HeaderAuthControl = () => {
     </div>
   )
 }
+
 const NotFound = () => (
   <div className="detail">
     <h1>404</h1>
@@ -466,15 +2887,23 @@ const NotFound = () => (
 
 function App() {
   return (
-    <Router>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/workflows/:workflowId" element={<WorkflowDetail />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Layout>
-    </Router>
+    <SessionProvider>
+      <Router>
+        <Layout>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/workflows/:workflowId" element={<WorkflowDetail />} />
+            <Route path="/channels/:idOrSlug" element={<ChannelDetail />} />
+            <Route path="/me/channels" element={<MyChannels />} />
+            <Route path="/me/channels/new" element={<CreateManagedChannel />} />
+            <Route path="/me/channels/:channelId" element={<ManagedChannelDetailRoute />} />
+            <Route path="/admin/login" element={<AdminLogin />} />
+            <Route path="/admin/review-requests" element={<AdminReviewRequests />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Layout>
+      </Router>
+    </SessionProvider>
   )
 }
 
