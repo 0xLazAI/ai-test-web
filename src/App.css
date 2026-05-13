@@ -691,6 +691,116 @@ nav a.active {
   border-top: 1px solid #e2e8f0;
 }
 
+.admin-tab-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 28px;
+}
+
+.admin-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid #dbe4f0;
+  background: white;
+  color: #475569;
+  text-decoration: none;
+  font-weight: 600;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.admin-tab:hover {
+  border-color: #cbd5e1;
+  color: #0f172a;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+}
+
+.admin-tab.active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: white;
+}
+
+.queue-overview-summary {
+  margin-bottom: 18px;
+}
+
+.queue-overview-status-row {
+  margin-bottom: 18px;
+}
+
+.queue-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.queue-overview-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 22px;
+  padding: 20px;
+  background: white;
+}
+
+.queue-overview-code {
+  overflow-wrap: anywhere;
+}
+
+.queue-overview-metrics {
+  margin-top: 16px;
+}
+
+.queue-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.queue-breakdown-block {
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 16px;
+  background: #f8fafc;
+}
+
+.queue-breakdown-title {
+  margin: 0 0 12px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.queue-breakdown-list {
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.queue-breakdown-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #475569;
+}
+
+.queue-breakdown-list dt,
+.queue-breakdown-list dd {
+  margin: 0;
+}
+
+.queue-breakdown-list dt {
+  color: #64748b;
+}
+
+.queue-breakdown-list dd {
+  font-weight: 700;
+  color: #0f172a;
+}
+
 @media (max-width: 820px) {
   .action-field {
     grid-template-columns: 1fr;
@@ -698,6 +808,10 @@ nav a.active {
 
   .action-field .ghost {
     justify-self: start;
+  }
+
+  .queue-breakdown-grid {
+    grid-template-columns: 1fr;
   }
 }
 

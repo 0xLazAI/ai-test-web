@@ -27,14 +27,14 @@ const SINGULARITY_WORKFLOW_OWNER = 'Jim（tg：@jimMao0x1）'
 const SINGULARITY_WORKFLOW_METRICS = [
   { label: 'agent数量', value: '5 个' },
   { label: '负责人', value: SINGULARITY_WORKFLOW_OWNER },
-  { label: '上线渠道', value: 'openclaw、tg群' },
+  { label: '上线渠道', value: 'openclaw-tgbot' },
 ]
 const SINGULARITY_WORKFLOW_PHASES = [
   '选题确认：主编收束命题方向，确认本轮内容要解决的核心问题。',
   '故事印证：补事实、原典、案例与反例，为后续论证准备材料。',
-  '正反对垒：Sentinel 发起论证，Adversary 多轮审辩与挑战。',
+  '正反对垒：Sentinel 自动发起论证，Adversary 自动多轮审辩与挑战。',
   '升级解读：主编整理冲突后的判断，沉淀 rejected logic log 与升级观点。',
-  '草稿循环：writer 起草，reviewer 审稿，直到主编确认可发布。',
+  '草稿循环：writer 自动起草，reviewer 自动审稿，直到主编确认可发布。',
   '正式定稿：final-writer 生成正式稿，主编完成最后确认与出街准备。',
 ]
 const SINGULARITY_USAGE_STEPS = [
@@ -291,6 +291,20 @@ function formatDate(value) {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date)
+}
+
+function formatDurationMs(value) {
+  const normalized = Number(value)
+  if (!Number.isFinite(normalized) || normalized < 0) {
+    return '未记录'
+  }
+  if (normalized < 1000) {
+    return `${Math.round(normalized)} ms`
+  }
+  if (normalized < 60_000) {
+    return `${(normalized / 1000).toFixed(normalized >= 10_000 ? 0 : 1)} s`
+  }
+  return `${(normalized / 60_000).toFixed(normalized >= 600_000 ? 0 : 1)} min`
 }
 
 function formatStatus(value) {
@@ -955,6 +969,33 @@ function useAdminReviewRequests(token, filters = {}) {
 
   return {
     reviewRequests: query.data || [],
+    isLoading: Boolean(token) && query.isLoading,
+    error: query.error?.message || '',
+    refetch: query.refetch,
+  }
+}
+
+function useAdminQueueOverview(token) {
+  const query = useQuery({
+    queryKey: ['admin-queue-overview', token],
+    enabled: Boolean(token),
+    refetchOnWindowFocus: false,
+    refetchInterval: 15000,
+    queryFn: async () => {
+      try {
+        const result = await requestApi('/v1/admin/queue-overview', {}, token)
+        return result?.overview || null
+      } catch (error) {
+        if (isMissingEndpointError(error)) {
+          throw new Error('当前后端还没有部署队列纵览接口，请先部署 deployer 最新版本。')
+        }
+        throw error
+      }
+    },
+  })
+
+  return {
+    overview: query.data || null,
     isLoading: Boolean(token) && query.isLoading,
     error: query.error?.message || '',
     refetch: query.refetch,
@@ -3300,6 +3341,165 @@ const AdminLogin = () => {
   )
 }
 
+const AdminNavTabs = () => (
+  <div className="admin-tab-row">
+    <NavLink to="/admin/review-requests" className={({ isActive }) => `admin-tab ${isActive ? 'active' : ''}`}>
+      创建审核
+    </NavLink>
+    <NavLink to="/admin/queue-overview" className={({ isActive }) => `admin-tab ${isActive ? 'active' : ''}`}>
+      队列纵览
+    </NavLink>
+  </div>
+)
+
+const AdminQueueOverviewPanel = ({ token }) => {
+  const {
+    overview,
+    isLoading,
+    error,
+    refetch,
+  } = useAdminQueueOverview(token)
+
+  const summary = overview?.summary || null
+  const queues = Array.isArray(overview?.queues) ? overview.queues : []
+  const statusTotals = summary?.statusTotals || {}
+
+  return (
+    <section className="resources resource-panel">
+      <div className="section-head section-head-tight">
+        <div>
+          <h2>任务队列纵览</h2>
+          <p className="section-copy">这里同时看 Redis 队列积压和 worker 最近 1 小时 / 24 小时的消费情况。</p>
+        </div>
+        <div className="inline-actions">
+          {overview?.generatedAt && <span className="count">刷新于 {formatDate(overview.generatedAt)}</span>}
+          <button type="button" onClick={() => refetch()}>
+            刷新概览
+          </button>
+        </div>
+      </div>
+
+      {isLoading && <p className="panel-state">正在加载队列纵览…</p>}
+      {!isLoading && error && <p className="panel-state error">{error}</p>}
+      {!isLoading && !error && !overview && <p className="panel-state">当前还没有可展示的队列数据。</p>}
+      {!isLoading && !error && overview && (
+        <>
+          <div className="stats queue-overview-summary">
+            <div>
+              <p className="stat-value">{summary?.backlogTotal ?? 0}</p>
+              <p className="stat-label">Redis 积压（ready + delayed）</p>
+            </div>
+            <div>
+              <p className="stat-value">{summary?.reservedTotal ?? 0}</p>
+              <p className="stat-label">Redis 保留中</p>
+            </div>
+            <div>
+              <p className="stat-value">{summary?.runningTaskTotal ?? 0}</p>
+              <p className="stat-label">数据库运行中</p>
+            </div>
+            <div>
+              <p className="stat-value">{summary?.processedAttemptsLastHour ?? 0}</p>
+              <p className="stat-label">近 1 小时已消费 attempt</p>
+            </div>
+            <div>
+              <p className="stat-value">{summary?.processedAttemptsLast24Hours ?? 0}</p>
+              <p className="stat-label">近 24 小时已消费 attempt</p>
+            </div>
+            <div>
+              <p className="stat-value">{summary?.retryWaitingTaskTotal ?? 0}</p>
+              <p className="stat-label">任务表等待重试</p>
+            </div>
+          </div>
+
+          <div className="review-status-row queue-overview-status-row">
+            <span className={`review-status-chip ${getReviewStatusTone('accepted')}`}>accepted {statusTotals.accepted || 0}</span>
+            <span className={`review-status-chip ${getReviewStatusTone('queued')}`}>queued {statusTotals.queued || 0}</span>
+            <span className={`review-status-chip ${getReviewStatusTone('retry_waiting')}`}>retry_waiting {statusTotals.retryWaiting || 0}</span>
+            <span className={`review-status-chip ${getReviewStatusTone('running')}`}>running {statusTotals.running || 0}</span>
+            <span className={`review-status-chip ${getReviewStatusTone('cancel_requested')}`}>cancel_requested {statusTotals.cancelRequested || 0}</span>
+            <span className={`review-status-chip ${getReviewStatusTone('succeeded')}`}>succeeded {statusTotals.succeeded || 0}</span>
+            <span className={`review-status-chip ${getReviewStatusTone('failed')}`}>failed {statusTotals.failed || 0}</span>
+            <span className={`review-status-chip ${getReviewStatusTone('cancelled')}`}>cancelled {statusTotals.cancelled || 0}</span>
+          </div>
+
+          <div className="queue-overview-grid">
+            {queues.map((queue) => (
+              <article className="queue-overview-card" key={queue.queueName}>
+                <div className="task-card-head">
+                  <div>
+                    <p className="task-title">{queue.label}</p>
+                    <p className="task-meta queue-overview-code">{queue.queueName}</p>
+                  </div>
+                  <div className="review-status-row">
+                    <span className={`review-status-chip ${queue.paused ? 'muted' : 'success'}`}>
+                      {queue.paused ? 'paused' : 'consuming'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="meta-grid queue-overview-metrics">
+                  <div className="meta-card">
+                    <p>ready</p>
+                    <strong>{queue.redis.ready}</strong>
+                  </div>
+                  <div className="meta-card">
+                    <p>delayed</p>
+                    <strong>{queue.redis.delayed}</strong>
+                  </div>
+                  <div className="meta-card">
+                    <p>reserved</p>
+                    <strong>{queue.redis.reserved}</strong>
+                  </div>
+                  <div className="meta-card">
+                    <p>active tasks</p>
+                    <strong>{queue.tasks.activeTotal}</strong>
+                  </div>
+                  <div className="meta-card">
+                    <p>近 1h 已消费</p>
+                    <strong>{queue.attempts.lastHour.processedTotal}</strong>
+                  </div>
+                  <div className="meta-card">
+                    <p>近 24h 平均耗时</p>
+                    <strong>{formatDurationMs(queue.attempts.avgDurationMsLast24Hours)}</strong>
+                  </div>
+                </div>
+
+                <div className="queue-breakdown-grid">
+                  <div className="queue-breakdown-block">
+                    <p className="queue-breakdown-title">任务主状态</p>
+                    <dl className="queue-breakdown-list">
+                      <div><dt>accepted</dt><dd>{queue.tasks.accepted}</dd></div>
+                      <div><dt>queued</dt><dd>{queue.tasks.queued}</dd></div>
+                      <div><dt>retry_waiting</dt><dd>{queue.tasks.retryWaiting}</dd></div>
+                      <div><dt>running</dt><dd>{queue.tasks.running}</dd></div>
+                      <div><dt>cancel_requested</dt><dd>{queue.tasks.cancelRequested}</dd></div>
+                    </dl>
+                  </div>
+
+                  <div className="queue-breakdown-block">
+                    <p className="queue-breakdown-title">近 24 小时消费</p>
+                    <dl className="queue-breakdown-list">
+                      <div><dt>succeeded</dt><dd>{queue.attempts.last24Hours.succeeded}</dd></div>
+                      <div><dt>failed</dt><dd>{queue.attempts.last24Hours.failed}</dd></div>
+                      <div><dt>released</dt><dd>{queue.attempts.last24Hours.released}</dd></div>
+                      <div><dt>timed_out</dt><dd>{queue.attempts.last24Hours.timedOut}</dd></div>
+                      <div><dt>cancelled</dt><dd>{queue.attempts.last24Hours.cancelled}</dd></div>
+                    </dl>
+                  </div>
+                </div>
+
+                <p className="meta-footnote">
+                  最近完成：{formatDate(queue.attempts.lastFinishedAt)} · task types：{Array.isArray(queue.taskTypes) ? queue.taskTypes.join(', ') : '未记录'}
+                </p>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
 const AdminReviewRequests = () => {
   const { adminSession } = useSessionState()
   const token = adminSession.token || ''
@@ -3353,6 +3553,8 @@ const AdminReviewRequests = () => {
       <p className="eyebrow">Admin</p>
       <h1>管理员审核后台</h1>
       <p className="lead">这里集中处理“创建频道并部署”的管理员审核。通过后，系统才会真正创建频道并发起首发部署。</p>
+
+      <AdminNavTabs />
 
       <section className="resources resource-panel">
         <div className="section-head section-head-tight">
@@ -3433,6 +3635,30 @@ const AdminReviewRequests = () => {
           />
         )}
       </section>
+    </div>
+  )
+}
+
+const AdminQueueOverviewPage = () => {
+  const { adminSession } = useSessionState()
+  const token = adminSession.token || ''
+
+  if (!token) {
+    return (
+      <LoginRequiredState
+        title="管理员队列纵览"
+        description="请先用管理员账号密码登录，然后再查看队列概览。"
+      />
+    )
+  }
+
+  return (
+    <div className="detail">
+      <p className="eyebrow">Admin</p>
+      <h1>管理员队列纵览</h1>
+      <p className="lead">这里单独查看部署任务的积压、重试、消费效率和最近 24 小时的执行情况。</p>
+      <AdminNavTabs />
+      <AdminQueueOverviewPanel token={token} />
     </div>
   )
 }
@@ -3538,6 +3764,7 @@ const AdminReviewRequestDetail = () => {
       <p className="eyebrow">Admin</p>
       <h1>{reviewRequest.title || '管理员审核详情'}</h1>
       <p className="lead">这里会展示创建频道申请的完整内容、申请人信息、敏感字段摘要和审核执行轨迹。手动部署申请需要在通过前回填最终频道入口。</p>
+      <AdminNavTabs />
       {reviewRequest.status === 'pending' && deploymentMode === 'manual' && (
         <section className="resources resource-panel">
           <h2>手动部署回填</h2>
@@ -3825,6 +4052,7 @@ function App() {
             <Route path="/me/channels/:channelId" element={<ManagedChannelDetailRoute />} />
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/admin/review-requests" element={<AdminReviewRequests />} />
+            <Route path="/admin/queue-overview" element={<AdminQueueOverviewPage />} />
             <Route path="/admin/review-requests/:reviewRequestId" element={<AdminReviewRequestDetail />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
