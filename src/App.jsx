@@ -163,7 +163,7 @@ const STATUS_LABELS = {
   k8s_redeploy: '重新部署',
   k8s_deep_redeploy: '深度重新部署',
   legacy_seed: '遗留导入',
-  manual: '手动部署',
+  manual: '独立部署',
   none: '无需落地',
   open: '开放申请',
   paused: '已暂停',
@@ -1989,7 +1989,7 @@ const ReviewRequestDetailContent = ({
           </div>
           <div className="meta-card">
             <p>部署方式 / 目标</p>
-            <strong>{formatStatus(deploymentMode)} / {deploymentMode === 'manual' ? '管理员手动部署' : formatStatus(deploymentPayload.targetKind || '')}</strong>
+            <strong>{formatStatus(deploymentMode)} / {deploymentMode === 'manual' ? '管理员独立部署' : formatStatus(deploymentPayload.targetKind || '')}</strong>
           </div>
           <div className="meta-card">
             <p>Release Name</p>
@@ -2328,7 +2328,7 @@ const CreateManagedChannel = () => {
       return
     }
 
-    setSubmitState({ state: 'loading', message: deploymentMode === 'manual' ? '正在提交手动部署审核…' : '正在提交创建审核…' })
+    setSubmitState({ state: 'loading', message: deploymentMode === 'manual' ? '正在提交独立部署审核…' : '正在提交创建审核…' })
 
     try {
       const releaseName = buildReleaseName(slug)
@@ -2372,7 +2372,7 @@ const CreateManagedChannel = () => {
         navigate('/me/channels', {
           state: {
             message: deploymentMode === 'manual'
-              ? `频道「${name}」的手动部署申请已提交（${result.reviewRequest.id}）。管理员手动部署并审核通过后，频道会以手动部署方式上线。`
+              ? `频道「${name}」的独立部署申请已提交（${result.reviewRequest.id}）。管理员独立部署并审核通过后，频道会以独立部署方式上线。`
               : `频道「${name}」的创建审核已提交（${result.reviewRequest.id}）。管理员通过后才会真正创建频道并触发首发部署。`,
           },
         })
@@ -2403,7 +2403,7 @@ const CreateManagedChannel = () => {
       <p className="eyebrow">Workspace</p>
       <h1>新建频道申请</h1>
       <p className="lead">
-        当前表单统一走 `POST /v1/channels/deploy`。你可以选择“自动部署”或“手动部署”；普通用户提交后都会先进入管理员审核，再由平台自动部署，或由管理员手动部署并回填频道入口。
+        当前表单统一走 `POST /v1/channels/deploy`。你可以选择“自动部署”或“独立部署”；普通用户提交后都会先进入管理员审核，再由平台自动部署，或由管理员独立部署并回填频道入口。
       </p>
 
       <section className="resources resource-panel">
@@ -2411,7 +2411,7 @@ const CreateManagedChannel = () => {
           <div>
             <h2>频道表单</h2>
             <p className="section-copy">一个 workflow 下可以挂多个频道，所以这里需要显式选择 `workflowId`。频道展示名和内部部署 `releaseName` 分离；自动部署时 `releaseName` 会按 slug 自动生成全局唯一值。</p>
-            <p className="section-copy">自动部署会按默认 k8s 配置首发部署；手动部署则由管理员在外部完成部署，再回填频道入口，效果类似现在导入的那几条手动频道。</p>
+            <p className="section-copy">自动部署会按默认 k8s 配置首发部署；独立部署则由管理员在外部完成部署，再回填频道入口，效果类似现在导入的那几条独立频道。</p>
             {!!workflowsError && <p className="section-copy">工作流目录暂时加载失败，当前先使用默认 workflow 选项。</p>}
           </div>
         </div>
@@ -2462,7 +2462,7 @@ const CreateManagedChannel = () => {
             <span>部署方式</span>
             <select value={form.deploymentMode} onChange={(event) => handleChange('deploymentMode', event.target.value)}>
               <option value="auto">自动部署（平台自动发 k8s 任务）</option>
-              <option value="manual">手动部署（管理员手动部署并回填入口）</option>
+              <option value="manual">独立部署（独立部署到单独的服务器）</option>
             </select>
           </label>
           <label className="editor-field">
@@ -2518,8 +2518,8 @@ const CreateManagedChannel = () => {
             </div>
           ) : (
             <div className="editor-field editor-field-wide">
-              <span>手动部署说明</span>
-              <p className="panel-state">手动部署模式下，这里不会收集 k8s 首发部署密钥。管理员审核通过后，会在平台外手动部署实例，并把最终频道入口回填回来。</p>
+              <span>独立部署说明</span>
+              <p className="panel-state">独立部署模式下，这里不会收集 k8s 首发部署密钥。管理员审核通过后，会将频道独立部署到单独的服务器，并把最终频道入口回填回来。</p>
             </div>
           )}
         </form>
@@ -2527,7 +2527,7 @@ const CreateManagedChannel = () => {
         <div className="meta-grid create-channel-presets">
           <div className="meta-card">
             <p>部署方式</p>
-            <strong>{form.deploymentMode === 'manual' ? '手动部署' : '自动部署'}</strong>
+            <strong>{form.deploymentMode === 'manual' ? '独立部署' : '自动部署'}</strong>
           </div>
           <div className="meta-card">
             <p>目标类型</p>
@@ -2535,7 +2535,7 @@ const CreateManagedChannel = () => {
           </div>
           <div className="meta-card">
             <p>首发部署</p>
-            <strong>{form.deploymentMode === 'manual' ? '审核通过后由管理员手动部署' : '审核通过后提交'}</strong>
+            <strong>{form.deploymentMode === 'manual' ? '审核通过后由管理员独立部署' : '审核通过后提交'}</strong>
           </div>
         </div>
 
@@ -2556,7 +2556,7 @@ const CreateManagedChannel = () => {
   )
 }
 
-const ManagedTaskList = ({ tasks }) => {
+const ManagedTaskList = ({ tasks, retryableFreshDeployTaskId = '', onRetryFreshDeploy = null, isRetryFreshDeployDisabled = false }) => {
   if (!tasks.length) {
     return <p className="panel-state">当前还没有部署任务记录。</p>
   }
@@ -2577,6 +2577,13 @@ const ManagedTaskList = ({ tasks }) => {
           {task.startedAt && <p className="task-meta">开始时间 · {formatDate(task.startedAt)}</p>}
           {task.finishedAt && <p className="task-meta">完成时间 · {formatDate(task.finishedAt)}</p>}
           {task.errorMessage && <p className="task-error">{task.errorMessage}</p>}
+          {task.id === retryableFreshDeployTaskId && typeof onRetryFreshDeploy === 'function' && (
+            <div className="task-card-actions">
+              <button type="button" className="ghost" onClick={onRetryFreshDeploy} disabled={isRetryFreshDeployDisabled}>
+                重试首发部署
+              </button>
+            </div>
+          )}
         </article>
       ))}
     </div>
@@ -2613,6 +2620,7 @@ const MyChannelDetail = ({ channelId }) => {
   const k8sRedeployReleaseName = String(channel?.releaseName || bootstrapRequest.releaseName || '').trim()
   const k8sRedeployNamespace = String(channel?.namespace || bootstrapRequest.namespace || '').trim()
   const supportsK8sRedeploy = selectedTargetKind === 'k8s' && getChannelDeploymentMode(channel) === 'auto' && Boolean(k8sRedeployReleaseName)
+  const latestTask = tasks[0] || null
   const activeTask = useMemo(
     () => resolveActiveChannelTask(tasks, channel?.currentTaskId),
     [tasks, channel?.currentTaskId],
@@ -2950,8 +2958,60 @@ const MyChannelDetail = ({ channelId }) => {
   }
 
   const canRedeploy = supportsK8sRedeploy && Boolean(config)
+  const retryableFreshDeployTaskId = latestTask?.taskType === 'k8s_deploy'
+    && latestTask?.status === 'failed'
+    && selectedTargetKind === 'k8s'
+    && getChannelDeploymentMode(channel) === 'auto'
+    && Boolean(config)
+    ? latestTask.id
+    : ''
   const isActionPending = actionState.state === 'loading'
   const isOperationLocked = isActionPending || hasActiveOperation
+
+  const handleRetryFreshDeploy = async () => {
+    if (hasActiveOperation) {
+      setActionState({ state: 'error', message: activeOperationMessage })
+      return
+    }
+
+    if (!config) {
+      setActionState({ state: 'error', message: '当前没有可复用的持久化部署配置，先补建配置后才能重试首发部署。' })
+      return
+    }
+
+    setActionState({ state: 'loading', message: '正在提交首发部署重试任务…' })
+
+    try {
+      const result = await requestApi(
+        '/v1/deepflow/k8s/deploy',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            channelId: channel.id,
+            releaseName: k8sRedeployReleaseName || undefined,
+            namespace: k8sRedeployNamespace || undefined,
+            skipPersistChannelConfig: true,
+          }),
+        },
+        token,
+      )
+      const nextTaskId = String(result?.taskId || result?.task?.taskId || result?.task?.id || '').trim()
+      if (nextTaskId) {
+        setPendingTaskId(nextTaskId)
+      }
+      await Promise.all([
+        refetchChannel(),
+        refetchConfig(),
+        refetchTasks(),
+      ])
+      setActionState({ state: 'success', message: buildTaskSuccessMessage(result) })
+    } catch (error) {
+      setActionState({ state: 'error', message: error.message || '重试首发部署失败。' })
+    }
+  }
 
   return (
     <div className="detail">
@@ -3244,7 +3304,14 @@ const MyChannelDetail = ({ channelId }) => {
         <h2>最近任务</h2>
         {isTasksLoading && <p className="panel-state">正在加载最近任务…</p>}
         {!isTasksLoading && tasksError && <p className="panel-state error">{tasksError}</p>}
-        {!isTasksLoading && !tasksError && <ManagedTaskList tasks={tasks} />}
+        {!isTasksLoading && !tasksError && (
+          <ManagedTaskList
+            tasks={tasks}
+            retryableFreshDeployTaskId={retryableFreshDeployTaskId}
+            onRetryFreshDeploy={handleRetryFreshDeploy}
+            isRetryFreshDeployDisabled={isOperationLocked}
+          />
+        )}
       </section>
 
       <Link className="primary" to="/me/channels">返回我的频道</Link>
@@ -3701,7 +3768,7 @@ const AdminReviewRequestDetail = () => {
 
   const handleDecision = async (decision) => {
     if (decision === 'approve' && deploymentMode === 'manual' && !String(manualApprovalDraft.tgGroupId || '').trim()) {
-      setActionState({ state: 'error', message: '手动部署申请在通过前必须先填写 TG 群 ID。' })
+      setActionState({ state: 'error', message: '独立部署申请在通过前必须先填写 TG 群 ID。' })
       return
     }
     setActionState({
@@ -3763,12 +3830,12 @@ const AdminReviewRequestDetail = () => {
     <div className="detail">
       <p className="eyebrow">Admin</p>
       <h1>{reviewRequest.title || '管理员审核详情'}</h1>
-      <p className="lead">这里会展示创建频道申请的完整内容、申请人信息、敏感字段摘要和审核执行轨迹。手动部署申请需要在通过前回填最终频道入口。</p>
+      <p className="lead">这里会展示创建频道申请的完整内容、申请人信息、敏感字段摘要和审核执行轨迹。独立部署申请需要在通过前回填最终频道入口。</p>
       <AdminNavTabs />
       {reviewRequest.status === 'pending' && deploymentMode === 'manual' && (
         <section className="resources resource-panel">
-          <h2>手动部署回填</h2>
-          <p className="section-copy">管理员手动部署完成后，在这里填写 TG 群 ID；频道链接可以留空，系统会按 TG 群 ID 自动生成。通过审核时，系统会直接创建一个手动部署频道，效果类似当前导入的那几条手动频道。</p>
+          <h2>独立部署回填</h2>
+          <p className="section-copy">管理员独立部署完成后，在这里填写 TG 群 ID；频道链接可以留空，系统会按 TG 群 ID 自动生成。通过审核时，系统会直接创建一个独立部署频道，效果类似当前导入的那几条独立频道。</p>
           <div className="editor-grid channel-create-form">
             <label className="editor-field">
               <span>TG 群 ID</span>
