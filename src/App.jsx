@@ -980,7 +980,6 @@ function useAdminQueueOverview(token) {
     queryKey: ['admin-queue-overview', token],
     enabled: Boolean(token),
     refetchOnWindowFocus: false,
-    refetchInterval: 15000,
     queryFn: async () => {
       try {
         const result = await requestApi('/v1/admin/queue-overview', {}, token)
