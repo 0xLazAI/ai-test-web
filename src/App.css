@@ -473,6 +473,29 @@ nav a.active {
   color: #047857;
 }
 
+.channel-detail-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.channel-detail-cta-note {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.channel-detail-cta-note.error {
+  color: #b91c1c;
+}
+
+.channel-detail-cta-note.success {
+  color: #047857;
+}
+
 .flow-guide {
   flex-direction: column;
   align-items: stretch;

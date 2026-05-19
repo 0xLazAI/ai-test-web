@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { BrowserRouter as Router, Routes, Route, Link, NavLink, useLocation, useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Link, NavLink, Navigate, useLocation, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAccount, useConnect, useDisconnect, useSignMessage } from 'wagmi'
 import { useQuery } from '@tanstack/react-query'
 
@@ -377,6 +377,32 @@ function formatDurationMs(value) {
   return `${(normalized / 60_000).toFixed(normalized >= 600_000 ? 0 : 1)} min`
 }
 
+function formatStorageBytes(value) {
+  const normalized = Number(value)
+  if (!Number.isFinite(normalized) || normalized < 0) {
+    return '未获取'
+  }
+
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  let size = normalized
+  let unitIndex = 0
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024
+    unitIndex += 1
+  }
+
+  const fractionDigits = size >= 100 || unitIndex === 0 ? 0 : size >= 10 ? 1 : 2
+  return `${size.toFixed(fractionDigits)} ${units[unitIndex]}`
+}
+
+function formatPercentValue(value) {
+  const normalized = Number(value)
+  if (!Number.isFinite(normalized) || normalized < 0) {
+    return '未获取'
+  }
+  return `${normalized}%`
+}
+
 function formatStatus(value) {
   const normalized = String(value || '').trim()
   if (!normalized) {
@@ -682,6 +708,76 @@ function buildSecretFieldStates(secretEnvKeys = []) {
     ...field,
     configured: secretEnvKeys.includes(field.key),
   }))
+}
+
+function ChannelDetailAccessSection({ channel, token, onActionComplete }) {
+  const action = getChannelJoinActionState(channel, token)
+  const [state, setState] = useState({ kind: 'idle', message: '', reviewRequestId: '' })
+
+  const focusLogin = () => {
+    const loginAnchor = document.getElementById('header-auth-control')
+    if (loginAnchor) {
+      loginAnchor.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }
+
+  const handleApply = async () => {
+    if (!token) {
+      focusLogin()
+      setState({ kind: 'error', message: '请先连接钱包并完成登录。' })
+      return
+    }
+
+    setState({ kind: 'loading', message: '正在提交加入申请…' })
+    try {
+      const result = await requestApi(
+        `/v1/channels/${encodeURIComponent(channel.id)}/applications`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        },
+        token,
+      )
+      setState({
+        kind: 'success',
+        message: '已提交加入申请，等待频道 owner 审核。',
+        reviewRequestId: String(result?.application?.id || '').trim(),
+      })
+      await onActionComplete?.()
+    } catch (error) {
+      setState({ kind: 'error', message: error.message || '提交加入申请失败。', reviewRequestId: '' })
+    }
+  }
+
+  const helperText = state.message || action.helper
+
+  return (
+    <div className="channel-detail-cta">
+      {action.kind === 'link' && action.href && (
+        <a className="primary" href={action.href} target="_blank" rel="noreferrer">
+          {action.label || '打开入口'}
+        </a>
+      )}
+      {action.kind === 'apply' && (
+        <button type="button" className="primary" onClick={handleApply} disabled={state.kind === 'loading'}>
+          {state.kind === 'loading' ? '提交中…' : action.label}
+        </button>
+      )}
+      {action.kind === 'login' && (
+        <button type="button" className="primary" onClick={focusLogin}>
+          {action.label || '登录后申请'}
+        </button>
+      )}
+      {helperText && (
+        <p className={`channel-detail-cta-note ${state.kind === 'error' ? 'error' : state.kind === 'success' ? 'success' : ''}`}>
+          {helperText}
+        </p>
+      )}
+    </div>
+  )
 }
 
 function buildSecretPatch(secretDrafts) {
@@ -1702,6 +1798,7 @@ const ChannelDetail = () => {
     { label: '部署模式', value: formatStatus(getChannelDeploymentMode(displayChannel)) },
     { label: 'Owner', value: displayChannel.owner?.name || '未知' },
   ]
+  const pvcUsage = displayChannel.runtime?.pvcUsage || null
 
   const metadata = [
     { label: 'Slug', value: displayChannel.slug },
@@ -1720,6 +1817,9 @@ const ChannelDetail = () => {
     { label: '镜像标签', value: displayChannel.desiredSpec?.image?.tag },
     { label: '拉取策略', value: displayChannel.desiredSpec?.image?.pullPolicy },
     { label: 'PVC 大小', value: displayChannel.desiredSpec?.persistence?.size },
+    { label: 'PVC 已用', value: pvcUsage ? formatStorageBytes(pvcUsage.usedBytes) : '未获取' },
+    { label: 'PVC 剩余', value: pvcUsage ? formatStorageBytes(pvcUsage.availableBytes) : '未获取' },
+    { label: 'PVC 使用率', value: pvcUsage ? formatPercentValue(pvcUsage.usedPercent) : '未获取' },
     { label: '存储类', value: displayChannel.desiredSpec?.persistence?.storageClassName },
     { label: 'Access Modes', value: displayChannel.desiredSpec?.persistence?.accessModes },
   ]
@@ -1732,6 +1832,8 @@ const ChannelDetail = () => {
     { label: 'TG 探针状态', value: displayChannel.runtime?.tgGroupIdProbeStatus },
     { label: 'TG 探针来源', value: displayChannel.runtime?.tgGroupIdProbeSource },
     { label: 'TG 探针说明', value: displayChannel.runtime?.tgGroupIdProbeReason },
+    { label: 'PVC 采样时间', value: formatDate(pvcUsage?.checkedAt) },
+    { label: 'PVC 采样 Pod', value: pvcUsage?.podName || '未获取' },
     { label: '运行时更新时间', value: formatDate(displayChannel.runtime?.updatedAt) },
     { label: '错误信息', value: displayChannel.runtime?.errorMessage || '无' },
   ]
@@ -1751,15 +1853,7 @@ const ChannelDetail = () => {
         ))}
       </div>
 
-      <section className="resources">
-        <h2>访问入口</h2>
-        <div className="resource-links">
-          <ChannelAccessAction channel={displayChannel} token={token} onActionComplete={refetch} showHelper />
-          <a href={`${API_BASE_URL}/v1/channels/${resolveChannelRouteId(displayChannel)}`} target="_blank" rel="noreferrer">
-            查看原始 JSON
-          </a>
-        </div>
-      </section>
+      <ChannelDetailAccessSection channel={displayChannel} token={token} onActionComplete={refetch} />
 
       <section className="resources">
         <h2>公开元数据</h2>
@@ -2688,6 +2782,7 @@ const MyChannelDetail = ({ channelId }) => {
   const selectedTargetKind = config?.targetKind || channel?.targetKind || 'k8s'
   const k8sRedeployReleaseName = String(channel?.releaseName || bootstrapRequest.releaseName || '').trim()
   const k8sRedeployNamespace = String(channel?.namespace || bootstrapRequest.namespace || '').trim()
+  const pvcUsage = channel?.runtime?.pvcUsage || null
   const supportsK8sRedeploy = selectedTargetKind === 'k8s' && getChannelDeploymentMode(channel) === 'auto' && Boolean(k8sRedeployReleaseName)
   const latestTask = tasks[0] || null
   const activeTask = useMemo(
@@ -2779,6 +2874,8 @@ const MyChannelDetail = ({ channelId }) => {
     { label: 'Resource Key', value: channel.resourceKey || '未绑定' },
     { label: '当前任务', value: channel.currentTaskId || '无' },
     { label: 'TG 群 ID', value: getChannelTgGroupId(channel, { allowRuntimeFallback: true }) || '未探测到' },
+    { label: 'PVC 已用', value: pvcUsage ? formatStorageBytes(pvcUsage.usedBytes) : '未获取' },
+    { label: 'PVC 使用率', value: pvcUsage ? formatPercentValue(pvcUsage.usedPercent) : '未获取' },
   ]
   const canBootstrapConfig = Object.keys(bootstrapRequest).length > 0
   const secretFieldStates = buildSecretFieldStates(config?.secretEnvKeys || [])
@@ -3648,12 +3745,7 @@ const AdminReviewRequests = () => {
   } = useAdminReviewRequests(token, { requestType: 'channel_create', status: statusFilter })
 
   if (!token) {
-    return (
-      <LoginRequiredState
-        title="管理员审核后台"
-        description="请先用管理员账号密码登录，然后再进入审核后台。"
-      />
-    )
+    return <Navigate to={ADMIN_LOGIN_PATH} replace />
   }
 
   const handleDecision = async (reviewRequestId, decision) => {
@@ -3779,12 +3871,7 @@ const AdminQueueOverviewPage = () => {
   const token = adminSession.token || ''
 
   if (!token) {
-    return (
-      <LoginRequiredState
-        title="管理员队列纵览"
-        description="请先用管理员账号密码登录，然后再查看队列概览。"
-      />
-    )
+    return <Navigate to={ADMIN_LOGIN_PATH} replace />
   }
 
   return (
@@ -3826,12 +3913,7 @@ const AdminReviewRequestDetail = () => {
         : '未处理')
 
   if (!token) {
-    return (
-      <LoginRequiredState
-        title="管理员审核详情"
-        description="请先用管理员账号密码登录，然后再查看审核详情。"
-      />
-    )
+    return <Navigate to={ADMIN_LOGIN_PATH} replace />
   }
 
   const handleDecision = async (decision) => {
@@ -3945,6 +4027,7 @@ const HeaderAuthControl = () => {
   const { session, adminSession, setSession, setAdminSession } = useSessionState()
   const [status, setStatus] = useState({ state: 'idle', message: '' })
   const [hasFetchedProfile, setHasFetchedProfile] = useState(Boolean(session.profileName))
+  const [pendingLoginAfterConnect, setPendingLoginAfterConnect] = useState(false)
 
   const { address, isConnected } = useAccount()
   const { connect, connectors, status: connectStatus, error: connectError, variables: connectVariables } = useConnect()
@@ -4046,7 +4129,13 @@ const HeaderAuthControl = () => {
     }
   }, [location.pathname, session.token])
 
-  const handleLoginFlow = async () => {
+  useEffect(() => {
+    if (pendingLoginAfterConnect && connectStatus === 'error') {
+      setPendingLoginAfterConnect(false)
+    }
+  }, [connectStatus, pendingLoginAfterConnect])
+
+  const handleLoginFlow = useCallback(async () => {
     if (!isConnected || !normalizedAddress) {
       setStatus({ state: 'error', message: '请先连接钱包。' })
       return
@@ -4094,7 +4183,15 @@ const HeaderAuthControl = () => {
       const message = error?.message === 'User rejected the request.' ? '你取消了签名，请重试。' : (error.message || '登录失败，请稍后再试。')
       setStatus({ state: 'error', message })
     }
-  }
+  }, [fetchNonce, fetchProfile, isConnected, normalizedAddress, signMessageAsync, setSession])
+
+  useEffect(() => {
+    if (!pendingLoginAfterConnect || !isConnected || !normalizedAddress || session.token) {
+      return
+    }
+    setPendingLoginAfterConnect(false)
+    handleLoginFlow()
+  }, [handleLoginFlow, isConnected, normalizedAddress, pendingLoginAfterConnect, session.token])
 
   const handlePrimaryClick = () => {
     if (!isConnected) {
@@ -4103,6 +4200,7 @@ const HeaderAuthControl = () => {
         setStatus({ state: 'error', message: '未检测到浏览器钱包，请先安装。' })
         return
       }
+      setPendingLoginAfterConnect(true)
       connect({ connector: defaultConnector })
       return
     }
@@ -4117,18 +4215,26 @@ const HeaderAuthControl = () => {
     setSession(INITIAL_SESSION)
     setStatus({ state: 'idle', message: '已退出登录。' })
     setHasFetchedProfile(false)
+    setPendingLoginAfterConnect(false)
   }
 
   const handleAdminLogout = () => {
     setAdminSession(INITIAL_ADMIN_SESSION)
   }
 
-  const primaryMode = !isConnected ? 'connect' : session.token ? 'profile' : 'login'
-  const buttonLabel = primaryMode === 'connect'
-    ? (connectStatus === 'pending' ? '连接中…' : '连接钱包')
-    : primaryMode === 'login'
-      ? (status.state === 'loading' ? '登录中…' : '登录工作流')
-      : (session.profileName || (normalizedAddress ? `${normalizedAddress.slice(0, 6)}…${normalizedAddress.slice(-4)}` : '已登录'))
+  const primaryMode = session.token ? 'profile' : 'login'
+  const buttonLabel = primaryMode === 'login'
+    ? (connectStatus === 'pending'
+      ? '连接中…'
+      : status.state === 'loading'
+        ? '登录中…'
+        : '登录工作流')
+    : (session.profileName || (normalizedAddress ? `${normalizedAddress.slice(0, 6)}…${normalizedAddress.slice(-4)}` : '已登录'))
+
+  const handleConnectorClick = (connector) => {
+    setPendingLoginAfterConnect(true)
+    connect({ connector })
+  }
 
   const showStatusMessage = status.message && status.state !== 'success'
 
@@ -4138,7 +4244,7 @@ const HeaderAuthControl = () => {
         type="button"
         className="primary"
         onClick={handlePrimaryClick}
-        disabled={(primaryMode === 'login' && status.state === 'loading') || (primaryMode === 'connect' && connectStatus === 'pending')}
+        disabled={(primaryMode === 'login' && (status.state === 'loading' || connectStatus === 'pending'))}
       >
         {buttonLabel}
       </button>
@@ -4166,7 +4272,7 @@ const HeaderAuthControl = () => {
               type="button"
               className="ghost"
               key={connector.id ?? connector.uid ?? connector.name}
-              onClick={() => connect({ connector })}
+              onClick={() => handleConnectorClick(connector)}
               disabled={connectStatus === 'pending' && connectVariables?.connector?.id === connector.id}
             >
               {connectStatus === 'pending' && connectVariables?.connector?.id === connector.id ? '连接中…' : connector.name}
