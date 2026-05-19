@@ -14,6 +14,7 @@ const SESSION_KEY = 'apixlab_session'
 const ADMIN_SESSION_KEY = 'apixlab_admin_session'
 const INITIAL_SESSION = { token: null, userId: null, profileName: '' }
 const INITIAL_ADMIN_SESSION = { token: null, adminId: null, username: '', role: '', expiresAt: '' }
+const USER_LOGIN_NOTICE_KEY = 'apixlab_user_login_notice'
 const ADMIN_LOGIN_PATH = '/admin/login'
 const SECRET_FIELD_DEFINITIONS = [
   { key: 'CLAWCHEF_VAR_OPENAI_API_KEY', label: 'OpenAI API Key', kind: 'api', required: true },
@@ -240,6 +241,22 @@ function invalidateAdminSessionAndRedirect() {
   }
 }
 
+function invalidateUserSessionAndRedirect() {
+  localStorage.removeItem(SESSION_KEY)
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem(USER_LOGIN_NOTICE_KEY, '登录态已失效，请重新登录。')
+    window.dispatchEvent(new CustomEvent('user-session-invalidated'))
+    if (window.location.pathname !== '/') {
+      window.location.assign('/')
+      return
+    }
+    const loginAnchor = document.getElementById('header-auth-control')
+    if (loginAnchor) {
+      loginAnchor.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }
+}
+
 function SessionProvider({ children }) {
   const [session, setSession] = useState(readStoredSession)
   const [adminSession, setAdminSession] = useState(readStoredAdminSession)
@@ -269,6 +286,16 @@ function SessionProvider({ children }) {
       window.removeEventListener('admin-session-invalidated', handleAdminSessionInvalidated)
     }
   }, [setAdminSession])
+
+  useEffect(() => {
+    const handleUserSessionInvalidated = () => {
+      setSession(INITIAL_SESSION)
+    }
+    window.addEventListener('user-session-invalidated', handleUserSessionInvalidated)
+    return () => {
+      window.removeEventListener('user-session-invalidated', handleUserSessionInvalidated)
+    }
+  }, [setSession])
 
   return (
     <SessionContext.Provider value={{ session, adminSession, setSession, setAdminSession }}>
@@ -303,6 +330,8 @@ async function requestApi(path, init = {}, token = '') {
         || `请求失败：HTTP ${response.status}`
     if (response.status === 401 && String(token || '').startsWith('adm_') && /Invalid admin token/i.test(String(message || ''))) {
       invalidateAdminSessionAndRedirect()
+    } else if (response.status === 401 && token && !String(token || '').startsWith('adm_')) {
+      invalidateUserSessionAndRedirect()
     }
     throw new Error(message)
   }
@@ -3912,6 +3941,7 @@ const AdminReviewRequestDetail = () => {
 }
 
 const HeaderAuthControl = () => {
+  const location = useLocation()
   const { session, adminSession, setSession, setAdminSession } = useSessionState()
   const [status, setStatus] = useState({ state: 'idle', message: '' })
   const [hasFetchedProfile, setHasFetchedProfile] = useState(Boolean(session.profileName))
@@ -3999,6 +4029,22 @@ const HeaderAuthControl = () => {
       fetchProfile(session.userId, session.token, true).finally(() => setHasFetchedProfile(true))
     }
   }, [fetchProfile, hasFetchedProfile, session.profileName, session.token, session.userId])
+
+  useEffect(() => {
+    if (session.token) {
+      return
+    }
+    const loginNotice = sessionStorage.getItem(USER_LOGIN_NOTICE_KEY)
+    if (!loginNotice) {
+      return
+    }
+    sessionStorage.removeItem(USER_LOGIN_NOTICE_KEY)
+    setStatus({ state: 'error', message: loginNotice })
+    const loginAnchor = document.getElementById('header-auth-control')
+    if (loginAnchor) {
+      loginAnchor.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [location.pathname, session.token])
 
   const handleLoginFlow = async () => {
     if (!isConnected || !normalizedAddress) {
