@@ -1204,6 +1204,7 @@ nav a.active {
   border-radius: 18px;
   padding: 18px;
   background: white;
+  min-width: 0;
 }
 
 .task-card-head {
@@ -1212,6 +1213,10 @@ nav a.active {
   align-items: flex-start;
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.task-card-head > div {
+  min-width: 0;
 }
 
 .task-title,
@@ -1288,6 +1293,8 @@ nav a.active {
   color: #475569;
   font-size: 0.9rem;
   line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .task-error {

@@ -2661,6 +2661,13 @@ const MyChannelDetail = ({ channelId }) => {
     return () => window.clearInterval(timer)
   }, [token, hasActiveOperation, refetchChannel, refetchConfig, refetchTasks])
 
+  useEffect(() => {
+    if (!hasActiveOperation || !isEditingConfig) {
+      return
+    }
+    setIsEditingConfig(false)
+  }, [hasActiveOperation, isEditingConfig])
+
   if (!token) {
     return <LoginRequiredState title="频道维护" description="维护页已经加上了，但这里走的是 owner 权限接口，必须先登录。" />
   }
@@ -2712,6 +2719,10 @@ const MyChannelDetail = ({ channelId }) => {
     : ''
 
   const handleBeginEdit = () => {
+    if (hasActiveOperation) {
+      setSubmitState({ state: 'error', message: activeOperationMessage })
+      return
+    }
     setSecretDrafts({})
     setSubmitState({ state: 'idle', message: '' })
     setActionState({ state: 'idle', message: '' })
@@ -3059,13 +3070,7 @@ const MyChannelDetail = ({ channelId }) => {
               <div>
                 <p className="action-label">重新部署</p>
                 <p className="action-copy">
-                  重新跑一遍
-                  {' '}
-                  <code>helm upgrade --install</code>
-                  ，然后等待
-                  {' '}
-                  <code>kubectl rollout status</code>
-                  。
+                  按当前配置重新部署一次频道，让刚修改的配置重新生效。
                 </p>
               </div>
               <button type="button" className="ghost" onClick={handleRedeploy} disabled={!canRedeploy || isOperationLocked}>
@@ -3077,17 +3082,7 @@ const MyChannelDetail = ({ channelId }) => {
                 <div>
                   <p className="action-label">深度重新部署</p>
                   <p className="action-copy">
-                    先跑
-                    {' '}
-                    <code>helm upgrade --install</code>
-                    ，再执行
-                    {' '}
-                    <code>kubectl rollout restart deployment/&lt;release&gt;</code>
-                    {' '}
-                    和
-                    {' '}
-                    <code>kubectl rollout status</code>
-                    。
+                    拉取最新代码，并把频道完整重启一次。适合升级代码或排查异常。
                   </p>
                 </div>
                 <button type="button" className="ghost" onClick={handleDeepRedeploy} disabled={!canRedeploy || isOperationLocked}>
@@ -3218,13 +3213,13 @@ const MyChannelDetail = ({ channelId }) => {
               <p className="guide-title">密钥配置状态</p>
               <p className="section-copy">这里只维护 API Key 和 Bot Token。</p>
             </div>
-            {!isConfigLoading && !configError && (
+            {!isConfigLoading && !configError && !hasActiveOperation && (
               <div className="inline-actions">
                 <button
                   type="button"
                   className="ghost"
                   onClick={handleBeginEdit}
-                  disabled={(!config && isTasksLoading) || hasActiveOperation}
+                  disabled={!config && isTasksLoading}
                 >
                   {config ? '编辑密钥' : '补建配置并编辑密钥'}
                 </button>
@@ -3247,7 +3242,11 @@ const MyChannelDetail = ({ channelId }) => {
           </p>
         )}
 
-        {isEditingConfig && (
+        {!isConfigLoading && !configError && hasActiveOperation && (
+          <p className="section-copy">{activeOperationMessage}</p>
+        )}
+
+        {isEditingConfig && !hasActiveOperation && (
           <div className="editor-panel">
             <div className="section-head section-head-tight">
               <div>
