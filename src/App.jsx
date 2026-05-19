@@ -14,6 +14,7 @@ const SESSION_KEY = 'apixlab_session'
 const ADMIN_SESSION_KEY = 'apixlab_admin_session'
 const INITIAL_SESSION = { token: null, userId: null, profileName: '' }
 const INITIAL_ADMIN_SESSION = { token: null, adminId: null, username: '', role: '', expiresAt: '' }
+const ADMIN_LOGIN_PATH = '/admin/login'
 const SECRET_FIELD_DEFINITIONS = [
   { key: 'CLAWCHEF_VAR_OPENAI_API_KEY', label: 'OpenAI API Key', kind: 'api', required: true },
   { key: 'GEMINI_API_KEY', label: 'Gemini API Key', kind: 'api', required: true },
@@ -206,9 +207,36 @@ function readStoredSession() {
 function readStoredAdminSession() {
   try {
     const stored = localStorage.getItem(ADMIN_SESSION_KEY)
-    return stored ? { ...INITIAL_ADMIN_SESSION, ...JSON.parse(stored) } : INITIAL_ADMIN_SESSION
+    if (!stored) {
+      return INITIAL_ADMIN_SESSION
+    }
+    const session = { ...INITIAL_ADMIN_SESSION, ...JSON.parse(stored) }
+    if (isAdminSessionExpired(session)) {
+      localStorage.removeItem(ADMIN_SESSION_KEY)
+      return INITIAL_ADMIN_SESSION
+    }
+    return session
   } catch {
     return INITIAL_ADMIN_SESSION
+  }
+}
+
+function isAdminSessionExpired(adminSession) {
+  const expiresAt = String(adminSession?.expiresAt || '').trim()
+  if (!expiresAt) {
+    return false
+  }
+  const expiresAtMs = new Date(expiresAt).getTime()
+  return Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now()
+}
+
+function invalidateAdminSessionAndRedirect() {
+  localStorage.removeItem(ADMIN_SESSION_KEY)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('admin-session-invalidated'))
+    if (window.location.pathname !== ADMIN_LOGIN_PATH) {
+      window.location.assign(ADMIN_LOGIN_PATH)
+    }
   }
 }
 
@@ -231,6 +259,16 @@ function SessionProvider({ children }) {
     }
     localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(adminSession))
   }, [adminSession])
+
+  useEffect(() => {
+    const handleAdminSessionInvalidated = () => {
+      setAdminSession(INITIAL_ADMIN_SESSION)
+    }
+    window.addEventListener('admin-session-invalidated', handleAdminSessionInvalidated)
+    return () => {
+      window.removeEventListener('admin-session-invalidated', handleAdminSessionInvalidated)
+    }
+  }, [setAdminSession])
 
   return (
     <SessionContext.Provider value={{ session, adminSession, setSession, setAdminSession }}>
@@ -263,6 +301,9 @@ async function requestApi(path, init = {}, token = '') {
         || payload?.error
         || payload?.errors?.[0]?.message
         || `请求失败：HTTP ${response.status}`
+    if (response.status === 401 && String(token || '').startsWith('adm_') && /Invalid admin token/i.test(String(message || ''))) {
+      invalidateAdminSessionAndRedirect()
+    }
     throw new Error(message)
   }
 
