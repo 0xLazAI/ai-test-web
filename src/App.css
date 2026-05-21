@@ -416,69 +416,52 @@ nav a.active {
   width: 100%;
 }
 
-.channel-access-action {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-end;
-  min-width: 220px;
-}
-
-.channel-access-controls {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.channel-access-secondary {
-  border-radius: 999px;
-  border: 1px solid #dbe4f0;
-  background: white;
-  color: #475569;
-  padding: 10px 16px;
-  text-decoration: none;
-  font-weight: 600;
-  font-size: 0.92rem;
-  transition: border-color 0.2s ease, color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.channel-access-secondary:hover {
-  border-color: #94a3b8;
-  color: #0f172a;
-  transform: translateY(-1px);
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
-}
-
-.channel-access-secondary:focus-visible {
-  outline: 2px solid #93c5fd;
-  outline-offset: 2px;
-}
-
-.channel-access-note {
-  margin: 0;
-  color: #64748b;
-  font-size: 0.85rem;
-  line-height: 1.5;
-  max-width: 320px;
-  text-align: right;
-}
-
-.channel-access-note.error {
-  color: #b91c1c;
-}
-
-.channel-access-note.success {
-  color: #047857;
-}
-
 .channel-detail-cta {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 10px;
   margin-top: 24px;
+}
+
+.workflow-create-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  padding: 0 22px;
+  border-radius: 999px;
+  border: 1px solid #0f172a;
+  background: #0f172a;
+  color: white;
+  text-decoration: none;
+  font-weight: 700;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.16);
+  transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+}
+
+.inline-actions .workflow-create-cta,
+.inline-actions .workflow-create-cta:visited {
+  border-color: #0f172a;
+  background: #0f172a;
+  color: white;
+}
+
+.workflow-create-cta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.2);
+  opacity: 0.96;
+}
+
+.inline-actions .workflow-create-cta:hover {
+  border-color: #0f172a;
+  background: #0f172a;
+  color: white;
+}
+
+.workflow-create-cta:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18), 0 18px 36px rgba(15, 23, 42, 0.2);
 }
 
 .channel-detail-cta-note {
@@ -1159,10 +1142,18 @@ nav a.active {
   font-size: 0.9rem;
 }
 
+.channel-case-preview {
+  margin: 10px 0 0;
+  color: #64748b;
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
 .channel-item a {
   border-radius: 999px;
-  background: #0f172a;
-  color: white;
+  border: 1px solid #dbe4f0;
+  background: white;
+  color: #0f172a;
   padding: 10px 18px;
   text-decoration: none;
   font-weight: 600;
@@ -1416,6 +1407,77 @@ nav a.active {
   overflow-wrap: anywhere;
 }
 
+.case-example-list {
+  display: grid;
+  gap: 16px;
+}
+
+.case-example-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 22px;
+  padding: 20px;
+  background: white;
+}
+
+.case-example-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.case-example-head a {
+  border-radius: 999px;
+  border: 1px solid #dbe4f0;
+  background: white;
+  color: #0f172a;
+  padding: 10px 18px;
+  text-decoration: none;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.case-example-preview {
+  margin: 12px 0 0;
+  color: #475569;
+  line-height: 1.7;
+}
+
+.case-example-details {
+  margin-top: 16px;
+}
+
+.case-example-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.case-example-script {
+  margin: 12px 0 0;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.75;
+  color: #0f172a;
+  font-family: inherit;
+  font-size: 0.95rem;
+}
+
+.case-example-url {
+  margin: 14px 0 0;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.case-example-url a {
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
 .compact-meta-grid {
   margin-top: 16px;
 }
@@ -1535,19 +1597,6 @@ nav a.active {
 
   .channel-actions {
     justify-content: flex-start;
-  }
-
-  .channel-access-action {
-    min-width: 0;
-    align-items: flex-start;
-  }
-
-  .channel-access-controls {
-    justify-content: flex-start;
-  }
-
-  .channel-access-note {
-    text-align: left;
   }
 
   .task-card-head,

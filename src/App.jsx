@@ -16,6 +16,9 @@ const INITIAL_SESSION = { token: null, userId: null, profileName: '' }
 const INITIAL_ADMIN_SESSION = { token: null, adminId: null, username: '', role: '', expiresAt: '' }
 const USER_LOGIN_NOTICE_KEY = 'apixlab_user_login_notice'
 const ADMIN_LOGIN_PATH = '/admin/login'
+const HIDDEN_PUBLIC_CHANNEL_NAMES = new Set([
+  'METIS / LAZAI 新闻',
+])
 const SECRET_FIELD_DEFINITIONS = [
   { key: 'CLAWCHEF_VAR_OPENAI_API_KEY', label: 'OpenAI API Key', kind: 'api', required: true },
   { key: 'GEMINI_API_KEY', label: 'Gemini API Key', kind: 'api', required: true },
@@ -41,11 +44,11 @@ const SINGULARITY_WORKFLOW_PHASES = [
 ]
 const SINGULARITY_USAGE_STEPS = [
   '部署前先准备 OpenAI API Key、Gemini API Key、主编 Bot、审核 Bot、视频 Bot；写手 Bot 可选，不填时不会阻塞首发部署。',
-  '点击“新建并部署”，填写频道信息和首发密钥；系统会自动补齐 K8s 默认镜像、Ingress、PVC 和镜像拉取配置。',
-  '等待首发部署完成。首次冷启动会执行 clawchef cook、workspace 初始化和 gateway 启动，所以通常比后续重部署更久。',
+  '点击“新建并部署”，填写频道信息和首发密钥。',
+  '等待首发部署完成。',
   '部署成功后进入“我的频道”，先确认运行状态、健康状态、公开入口和最近任务都已经正常。',
-  '如果只改了配置，直接在频道里修改部署配置即可；如果要强制重建 Pod 但保留 PVC，使用“深度重新部署”。',
-  '删除频道会清理实例并归档频道，部署配置、审核记录和任务历史会保留。',
+  '如果只改了配置，直接在频道里修改部署配置即可；如果要清掉会话信息、保留知识库，使用“深度重新部署”。',
+  '删除频道会清理实例并归档频道。',
 ]
 const SINGULARITY_BOT_USAGE = [
   '群里至少拉入主编 Bot、审核 Bot、视频生成 Bot。',
@@ -61,7 +64,6 @@ const SINGULARITY_ASSET_USAGE = [
     command: '先说“定义采集 …”定义采集方法，再说“跑热点”“看简报”或“提炼候选观点”。如果命题已经明确，也可以直接说“直接立项 …”。',
     result: '主编会按你定义的方法跑热点、产出简报、提炼候选命题，并把结果带回当前工作流。',
     example: '例子：`@主编 Bot 定义采集：每天抓 AI、科幻哲学、平台热议，给我 5 条可写命题。` 然后再说 `@主编 Bot 跑热点`。',
-    storage: '热点简报和过程会先进入当前项目的 `interaction_log.md`、`materials.md`，后续被主编挑中的命题再推进到正式项目步骤。',
   },
   {
     title: '素材包接入',
@@ -69,7 +71,6 @@ const SINGULARITY_ASSET_USAGE = [
     command: '先说“素材包”查看当前已绑定素材包和可用操作；新增时说“保存素材包 …”，项目里接入时说“绑定素材包 …”。',
     result: '主编会把素材包登记进共享素材库，并把指定素材包绑定到当前项目，供后续写作阶段调用。',
     example: '例子：`@主编 Bot 保存素材包 black-myth-core，包含黄风大圣、白象、狮驼岭相关设定文件。` 保存后再说 `@主编 Bot 绑定素材包 black-myth-core`。',
-    storage: '共享素材包会进入 `/.openclaw/shared/source-packs/<pack_id>/`，当前项目里只记录“绑定了哪些素材包”，不会整包复制进项目目录。',
   },
   {
     title: '素材包检索',
@@ -77,7 +78,6 @@ const SINGULARITY_ASSET_USAGE = [
     command: '在项目过程中直接说“查素材包 …”，把你要找的概念、人物、设定或案例写在后面。',
     result: '主编会去已绑定素材包里检索匹配内容，再把摘要和可直接使用的片段带回当前项目。',
     example: '例子：`@主编 Bot 查素材包 白象设定`，或者 `@主编 Bot 查素材包 适合写“权力感来自羞辱史”的人物案例`。',
-    storage: '检索结果不会把整个素材包搬进项目，而是写到当前项目的 `source_pack_queries.json`，里面保存 query、命中文件、摘要和可直接引用的全文片段。',
   },
   {
     title: '文章模板',
@@ -85,7 +85,6 @@ const SINGULARITY_ASSET_USAGE = [
     command: '当你看到一篇文章写得很好时，把文章链接或原文直接发给主编 Bot，并明确说“保存为模板”。如果你已经想好模板名，也可以一并告诉它。',
     result: '主编会先分析这篇文章的结构、节奏、导语、段落推进和写作方法，再把“原文 + 模板分析”保存成可复用模板。后续进入写稿阶段时，可以选择要绑定哪一个模板。',
     example: '例子：`@主编 Bot 把这篇文章保存为模板：https://example.com/article-1，模板名叫 dark-fantasy-soft-article-v1。` 或者直接把整篇原文贴给主编 Bot，再说“保存为模板”。',
-    storage: '模板会保存到 `/.openclaw/shared/templates/articles/<template_id>.md`。这个文件不只是文章正文，还会包含主编提炼出来的结构、节奏和写作方法。项目里只绑定 `template_id`，写稿时由 writer / reviewer 按绑定模板读取。',
   },
   {
     title: '知识库（写作规则 / 审稿门禁 / 修稿模式）',
@@ -93,7 +92,6 @@ const SINGULARITY_ASSET_USAGE = [
     command: '知识库分三类，录入时直接按类型对主编 Bot 说。1）写作规则：用于“以后写稿都尽量这么写”，口令是“保存写作规则：…”。2）审稿门禁：用于“出现什么问题就不能过稿”，口令是“保存门禁：…”。3）修稿模式：用于“遇到某类问题时怎么改”，口令是“保存修稿模式：…”。如果你只知道这条经验很重要，但不确定放哪类，也可以先说“写进知识库”，再让主编帮你归类。',
     result: '主编会先把这条经验归档到对应部分，再在后续流程里按角色分发。`writing_rules/` 会在 step 7 草稿阶段前交给 writer，影响首稿写法；`review_gates/` 会在 reviewer 审稿前加载，决定什么稿件必须打回；`repair_patterns/` 会在 reviewer 给出修改意见时一起加载，帮助它把“问题”转成“怎么改”的明确建议。final-writer 不直接通读整个共享知识库，而是只接当前项目已经整理好的最终修改要求。',
     example: '实际案例：如果你想固定一种写法，就说 `@主编 Bot 保存写作规则：写黑暗幻想时，正文必须从人物困境切入，先给代价，再给观点，不要一上来空讲世界观。` 如果你想加一道审稿红线，就说 `@主编 Bot 保存门禁：只要人物选择没有真实代价，就一律不通过审稿。` 如果你总结出一种常见修法，就说 `@主编 Bot 保存修稿模式：遇到结尾只剩观点总结时，补一个人物动作或代价回声来收束。`',
-    storage: '知识库会写进三块固定目录。`/.openclaw/shared/knowledge/writing_rules/`：长期写作方法，主要在 writer 起草前消费；`/.openclaw/shared/knowledge/review_gates/`：审稿门禁，主要在 reviewer 开始审稿前消费；`/.openclaw/shared/knowledge/repair_patterns/`：修稿模式，主要在 reviewer 形成修改意见时消费。你只需要告诉主编“记什么”，不需要自己管理这些目录。',
   },
   {
     title: '使用原则',
@@ -101,31 +99,34 @@ const SINGULARITY_ASSET_USAGE = [
     command: '你只需要明确说“要保存什么”或“要查什么”，不需要自己管理文件、路径和底层库结构。',
     result: '主编会统一负责写入、绑定、查询和调度这些知识资产，用户只看结果和下一步动作。',
     example: '例子：不要自己说“去改 templates/articles 里的某个文件”，而是直接说 `@主编 Bot 保存模板`、`@主编 Bot 查素材包 …`、`@主编 Bot 保存写作规则 …`。',
-    storage: '项目运行文件和共享知识库是分开的：项目内容存在当前项目目录里，共享知识资产存在 `/.openclaw/shared/` 下对应库中。',
   },
 ]
 const SINGULARITY_KNOWLEDGE_STRUCTURE = [
   {
     title: '共享素材层',
-    path: '/.openclaw/shared/source-packs/',
-    detail: '这里存原始素材包。每个素材包都有自己的 `PACK.md`、`GUIDE.md` 和原始资料文件，适合长期积累世界观、设定集、案例库。',
+    detail: '当你想长期积累世界观、人物设定、案例库或固定选题资料时，用这一层。它适合放“以后很多项目都会反复用到的底层素材”，而不是一次性项目草稿。',
   },
   {
     title: '共享模板层',
-    path: '/.openclaw/shared/templates/articles/',
-    detail: '这里存文章模板。每个模板通常来自“用户认可的一篇文章链接或原文”，并附带主编提炼出来的结构、节奏、导语和写法分析，供 writer / reviewer 在草稿阶段选择和参考。',
+    detail: '当你已经认可某篇文章的写法，希望以后反复复用它的结构、节奏、导语或叙事方式时，用这一层。它更像“写法参考模板”，适合给 writer 和 reviewer 在起草阶段直接套用。',
   },
   {
     title: '共享知识库层',
-    path: '/.openclaw/shared/knowledge/',
-    detail: '这里不是一个大杂烩，而是三块分开的知识库。`writing_rules/` 记录“以后写稿都该怎么写”的方法论，例如“先给困境再给观点”，通常由“保存写作规则”录入，在 step 7 起草前被 writer 消费。`review_gates/` 记录“什么情况绝不能过稿”的门禁，例如“没有代价感就打回”，通常由“保存门禁”录入，在 reviewer 开始审稿前消费。`repair_patterns/` 记录“遇到某类问题时怎么修”的修稿模式，例如“结尾空掉时补动作回声”，通常由“保存修稿模式”录入，在 reviewer 生成修改意见时消费。',
-  },
-  {
-    title: '当前项目层',
-    path: '/.openclaw/shared/projects/<project_id>/',
-    detail: '这里存这一个项目的运行过程：`project.md`、`materials.md`、`handoff.md`、`output.md`、`final-output.md`、`draft_review_history.md`。检索过的素材包结果也会进入这里的 `source_pack_queries.json`。',
+    detail: '当你不是在保存素材，而是在沉淀“以后都按这个方法做”的规则时，用这一层。比如写稿方法、不过稿门槛、遇到常见问题怎么修，都应该放到这里，让后续项目在起草、审稿和修稿时自动复用这些规则。',
   },
 ]
+
+function normalizePublicChannelName(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function isHiddenPublicChannel(channel) {
+  const normalizedName = normalizePublicChannelName(channel?.name)
+  if (!normalizedName) {
+    return false
+  }
+  return Array.from(HIDDEN_PUBLIC_CHANNEL_NAMES).some((name) => normalizePublicChannelName(name) === normalizedName)
+}
 
 const SessionContext = createContext({
   session: INITIAL_SESSION,
@@ -491,105 +492,9 @@ function getChannelPrimaryActionUrl(channel, options = {}) {
   return publicUrl || ''
 }
 
-function getChannelInviteAccess(channel) {
-  return {
-    canViewInvite: Boolean(channel?.canViewInvite),
-    currentUserJoinStatus: String(channel?.currentUserJoinStatus || 'none').trim() || 'none',
-    currentReviewRequestId: String(channel?.currentReviewRequestId || '').trim() || null,
-  }
-}
-
 function getReviewRequestDeploymentMode(reviewRequest) {
   const normalizedMode = String(reviewRequest?.requestPayload?.deployment?.mode || '').trim().toLowerCase()
   return normalizedMode === 'manual' ? 'manual' : 'auto'
-}
-
-function getChannelJoinActionState(channel, token = '') {
-  const access = getChannelInviteAccess(channel)
-  if (channel?.applicationMode === 'review') {
-    if (!token) {
-      return {
-        kind: 'login',
-        label: '登录后申请',
-        helper: '连接钱包并完成登录后，才能向频道 owner 提交加入申请。',
-      }
-    }
-    if (access.currentUserJoinStatus === 'pending') {
-      return {
-        kind: 'pending',
-        label: '审核中',
-        helper: '加入申请已经提交，等待频道 owner 审核。',
-      }
-    }
-    if (access.canViewInvite) {
-      const joinUrl = getChannelTelegramUrl(channel)
-      if (joinUrl) {
-        return {
-          kind: 'link',
-          label: '加入频道',
-          helper: '',
-          href: joinUrl,
-        }
-      }
-      return {
-        kind: 'unavailable',
-        label: '',
-        helper: '频道入口还没有准备好，等探测到 TG 群 ID 后再显示。',
-      }
-    }
-    if (access.currentUserJoinStatus === 'approved') {
-      const joinUrl = getChannelTelegramUrl(channel)
-      if (joinUrl) {
-        return {
-          kind: 'link',
-          label: '加入频道',
-          helper: '',
-          href: joinUrl,
-        }
-      }
-      return {
-        kind: 'unavailable',
-        label: '',
-        helper: '你已经通过审核，但频道入口还没有准备好。',
-      }
-    }
-    if (access.currentUserJoinStatus === 'rejected') {
-      return {
-        kind: 'apply',
-        label: '重新申请加入',
-        helper: '上一次申请未通过，可以重新提交申请。',
-      }
-    }
-    return {
-      kind: 'apply',
-      label: '申请加入',
-      helper: '提交后需要频道 owner 审核，通过后才会展示群入口。',
-    }
-  }
-
-  const joinUrl = getChannelTelegramUrl(channel)
-  if (joinUrl) {
-    return {
-      kind: 'link',
-      label: '加入频道',
-      helper: '',
-      href: joinUrl,
-    }
-  }
-
-  if (channel?.applicationMode === 'closed') {
-    return {
-      kind: 'closed',
-      label: '暂停加入',
-      helper: '当前频道关闭了新的加入申请。',
-    }
-  }
-
-  return {
-    kind: 'unavailable',
-    label: '暂未开放',
-    helper: '当前还没有可用的加入入口。',
-  }
 }
 
 function buildReviewRequestContext(reviewRequest) {
@@ -599,16 +504,6 @@ function buildReviewRequestContext(reviewRequest) {
     reviewRequest?.subjectKey || reviewRequest?.subjectId || '',
   ].filter(Boolean)
   return parts.join(' · ') || '审核请求'
-}
-
-function getReviewRequestDetailPath(reviewRequestId, options = {}) {
-  const normalizedReviewRequestId = String(reviewRequestId || '').trim()
-  if (!normalizedReviewRequestId) {
-    return options.admin ? '/admin/review-requests' : '/me/review-requests'
-  }
-  return options.admin
-    ? `/admin/review-requests/${encodeURIComponent(normalizedReviewRequestId)}`
-    : `/me/review-requests/${encodeURIComponent(normalizedReviewRequestId)}`
 }
 
 function looksLikeEthAddress(value) {
@@ -708,76 +603,6 @@ function buildSecretFieldStates(secretEnvKeys = []) {
     ...field,
     configured: secretEnvKeys.includes(field.key),
   }))
-}
-
-function ChannelDetailAccessSection({ channel, token, onActionComplete }) {
-  const action = getChannelJoinActionState(channel, token)
-  const [state, setState] = useState({ kind: 'idle', message: '', reviewRequestId: '' })
-
-  const focusLogin = () => {
-    const loginAnchor = document.getElementById('header-auth-control')
-    if (loginAnchor) {
-      loginAnchor.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }
-  }
-
-  const handleApply = async () => {
-    if (!token) {
-      focusLogin()
-      setState({ kind: 'error', message: '请先连接钱包并完成登录。' })
-      return
-    }
-
-    setState({ kind: 'loading', message: '正在提交加入申请…' })
-    try {
-      const result = await requestApi(
-        `/v1/channels/${encodeURIComponent(channel.id)}/applications`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({}),
-        },
-        token,
-      )
-      setState({
-        kind: 'success',
-        message: '已提交加入申请，等待频道 owner 审核。',
-        reviewRequestId: String(result?.application?.id || '').trim(),
-      })
-      await onActionComplete?.()
-    } catch (error) {
-      setState({ kind: 'error', message: error.message || '提交加入申请失败。', reviewRequestId: '' })
-    }
-  }
-
-  const helperText = state.message || action.helper
-
-  return (
-    <div className="channel-detail-cta">
-      {action.kind === 'link' && action.href && (
-        <a className="primary" href={action.href} target="_blank" rel="noreferrer">
-          {action.label || '打开入口'}
-        </a>
-      )}
-      {action.kind === 'apply' && (
-        <button type="button" className="primary" onClick={handleApply} disabled={state.kind === 'loading'}>
-          {state.kind === 'loading' ? '提交中…' : action.label}
-        </button>
-      )}
-      {action.kind === 'login' && (
-        <button type="button" className="primary" onClick={focusLogin}>
-          {action.label || '登录后申请'}
-        </button>
-      )}
-      {helperText && (
-        <p className={`channel-detail-cta-note ${state.kind === 'error' ? 'error' : state.kind === 'success' ? 'success' : ''}`}>
-          {helperText}
-        </p>
-      )}
-    </div>
-  )
 }
 
 function buildSecretPatch(secretDrafts) {
@@ -929,7 +754,8 @@ function usePublicChannels(workflowId = '', token = '') {
       }
       const suffix = params.toString() ? `?${params.toString()}` : ''
       const result = await requestApi(`/v1/channels${suffix}`, {}, token)
-      return Array.isArray(result?.channels) ? result.channels : []
+      const channels = Array.isArray(result?.channels) ? result.channels : []
+      return channels.filter((channel) => !isHiddenPublicChannel(channel))
     },
   })
 
@@ -948,7 +774,8 @@ function usePublicChannel(idOrSlug, token = '') {
     refetchOnWindowFocus: false,
     queryFn: async () => {
       const result = await requestApi(`/v1/channels/${encodeURIComponent(idOrSlug)}`, {}, token)
-      return result?.channel || null
+      const channel = result?.channel || null
+      return channel && !isHiddenPublicChannel(channel) ? channel : null
     },
   })
 
@@ -1165,115 +992,6 @@ function useAdminQueueOverview(token) {
     error: query.error?.message || '',
     refetch: query.refetch,
   }
-}
-
-const ChannelAccessAction = ({ channel, token, onActionComplete, showHelper = false }) => {
-  const navigate = useNavigate()
-  const action = getChannelJoinActionState(channel, token)
-  const access = getChannelInviteAccess(channel)
-  const [state, setState] = useState({ kind: 'idle', message: '', reviewRequestId: '' })
-
-  const focusLogin = () => {
-    const loginAnchor = document.getElementById('header-auth-control')
-    if (loginAnchor) {
-      loginAnchor.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }
-  }
-
-  const handleApply = async () => {
-    if (!token) {
-      focusLogin()
-      setState({ kind: 'error', message: '请先连接钱包并完成登录。' })
-      return
-    }
-
-    setState({ kind: 'loading', message: '正在提交加入申请…' })
-    try {
-      const result = await requestApi(
-        `/v1/channels/${encodeURIComponent(channel.id)}/applications`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({}),
-        },
-        token,
-      )
-      setState({
-        kind: 'success',
-        message: '已提交加入申请，等待频道 owner 审核。',
-        reviewRequestId: String(result?.application?.id || '').trim(),
-      })
-      await onActionComplete?.()
-    } catch (error) {
-      setState({ kind: 'error', message: error.message || '提交加入申请失败。', reviewRequestId: '' })
-    }
-  }
-
-  const handleLogin = () => {
-    focusLogin()
-    navigate('/me/channels')
-  }
-
-  let control = null
-  if (action.kind === 'link' && action.href) {
-    control = (
-      <a href={action.href} target="_blank" rel="noreferrer">
-        {action.label}
-      </a>
-    )
-  } else if (action.kind === 'apply') {
-    control = (
-      <button type="button" onClick={handleApply} disabled={state.kind === 'loading'}>
-        {state.kind === 'loading' ? '提交中…' : action.label}
-      </button>
-    )
-  } else if (action.kind === 'login') {
-    control = (
-      <button type="button" onClick={handleLogin}>
-        {action.label}
-      </button>
-    )
-  } else if (action.kind === 'unavailable') {
-    control = null
-  } else {
-    control = (
-      <button type="button" disabled>
-        {action.label}
-      </button>
-    )
-  }
-
-  const reviewRequestId = state.reviewRequestId || access.currentReviewRequestId || ''
-  const reviewProgressHref = reviewRequestId
-    ? getReviewRequestDetailPath(reviewRequestId)
-    : '/me/review-requests'
-  const helperMessage = state.message || (showHelper ? action.helper : '')
-  return (
-    <div className="channel-access-action">
-      <div className="channel-access-controls">
-        {(action.kind === 'pending' || state.kind === 'success') && reviewRequestId ? (
-          <Link to={reviewProgressHref} className="channel-access-secondary">
-            审核中
-          </Link>
-        ) : (
-          control
-        )}
-        {state.kind === 'error' && (
-          <Link to={reviewProgressHref} className="channel-access-secondary">
-            查看审批进度
-          </Link>
-        )}
-      </div>
-      {!!helperMessage && (
-        <p className={`channel-access-note ${state.kind === 'error' ? 'error' : state.kind === 'success' ? 'success' : ''}`}>
-          {helperMessage}
-          {reviewRequestId ? ` 申请单：${reviewRequestId}` : ''}
-        </p>
-      )}
-    </div>
-  )
 }
 
 const ReviewRequestList = ({ reviewRequests, emptyText, actionSlot, detailBasePath = '/me/review-requests' }) => {
@@ -1565,7 +1283,7 @@ const WorkflowDetail = () => {
       <p className="lead">{workflow.description || '暂未填写工作流说明。'}</p>
 
       <div className="stats">
-        {[...workflowMetrics, { label: '频道', value: `${workflow.channelCount || displayChannels.length} 个` }].map((metric) => (
+        {[...workflowMetrics, { label: '频道', value: `${displayChannels.length} 个` }].map((metric) => (
           <div key={metric.label}>
             <p className="stat-value">{metric.value}</p>
             <p className="stat-label">{metric.label}</p>
@@ -1577,10 +1295,10 @@ const WorkflowDetail = () => {
         <div className="section-head section-head-tight">
           <div>
             <h2>频道列表</h2>
-            <p className="section-copy">当前展示的是这个 workflow 下的公开频道。你也可以直接在这里新建一个频道挂到当前 workflow。</p>
+            <p className="section-copy">当前展示的是这个 workflow 下的公开频道。直接新建并部署，比逐个申请加入更直接。</p>
           </div>
           <div className="inline-actions">
-            <Link to={`/me/channels/new?workflowId=${encodeURIComponent(workflow.id)}`}>新建并部署</Link>
+            <Link className="workflow-create-cta" to={`/me/channels/new?workflowId=${encodeURIComponent(workflow.id)}`}>新建并部署</Link>
           </div>
         </div>
         {isChannelsLoading && <p className="panel-state">正在加载公开频道…</p>}
@@ -1589,27 +1307,37 @@ const WorkflowDetail = () => {
 
         {!isChannelsLoading && !channelsError && displayChannels.length > 0 && (
           <div className="channel-list">
-            {displayChannels.map((channel) => (
-              <div key={channel.id} className="channel-item">
-                <div>
-                  <p className="channel-title">{channel.name}</p>
-                  <p className="channel-desc">{summarizeChannel(channel)}</p>
-                  <p className="channel-meta">
-                    {formatStatus(channel.targetKind)} · {formatStatus(getChannelDeploymentMode(channel))} · {formatStatus(channel.lifecycleStatus)} · {formatStatus(channel.healthStatus)}
-                  </p>
-                  {channel.applicationMode === 'review' && !channel.canViewInvite && (
+            {displayChannels.map((channel) => {
+              const caseExample = Array.isArray(channel?.caseExamples) ? (channel.caseExamples[0] || null) : null
+              return (
+                <div key={channel.id} className="channel-item">
+                  <div>
+                    <p className="channel-title">{channel.name}</p>
+                    <p className="channel-desc">{summarizeChannel(channel)}</p>
                     <p className="channel-meta">
-                      加入策略 · {formatStatus(channel.applicationMode)}
-                      {channel.currentUserJoinStatus && channel.currentUserJoinStatus !== 'none' ? ` · ${formatStatus(channel.currentUserJoinStatus)}` : ''}
+                      {formatStatus(channel.targetKind)} · {formatStatus(getChannelDeploymentMode(channel))} · {formatStatus(channel.lifecycleStatus)} · {formatStatus(channel.healthStatus)}
                     </p>
-                  )}
+                    {caseExample && (
+                      <p className="channel-case-preview">
+                        案例预览 · {caseExample.title} · {caseExample.preview}
+                      </p>
+                    )}
+                    {channel.applicationMode === 'review' && !channel.canViewInvite && (
+                      <p className="channel-meta">
+                        加入策略 · {formatStatus(channel.applicationMode)}
+                        {channel.currentUserJoinStatus && channel.currentUserJoinStatus !== 'none' ? ` · ${formatStatus(channel.currentUserJoinStatus)}` : ''}
+                      </p>
+                    )}
+                  </div>
+                  <div className="channel-actions">
+                    <Link to={`/channels/${resolveChannelRouteId(channel)}`}>查看详情</Link>
+                    {caseExample && (
+                      <Link to={`/channels/${resolveChannelRouteId(channel)}#channel-examples`}>查看案例</Link>
+                    )}
+                  </div>
                 </div>
-                <div className="channel-actions">
-                  <Link to={`/channels/${resolveChannelRouteId(channel)}`}>查看详情</Link>
-                  <ChannelAccessAction channel={channel} token={token} onActionComplete={refetchChannels} />
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </section>
@@ -1653,8 +1381,7 @@ const WorkflowDetail = () => {
                   {SINGULARITY_KNOWLEDGE_STRUCTURE.map((item) => (
                     <li key={item.title} className="guide-detail-item">
                       <p><strong>{item.title}</strong></p>
-                      <p><strong>路径：</strong><code>{item.path}</code></p>
-                      <p><strong>作用：</strong>{item.detail}</p>
+                      <p><strong>适合场景：</strong>{item.detail}</p>
                     </li>
                   ))}
                 </ol>
@@ -1667,7 +1394,6 @@ const WorkflowDetail = () => {
                       <p><strong>怎么说：</strong>{item.command}</p>
                       <p><strong>会发生什么：</strong>{item.result}</p>
                       <p><strong>实际案例：</strong>{item.example}</p>
-                      <p><strong>会写到哪里：</strong>{item.storage}</p>
                     </li>
                   ))}
                 </ol>
@@ -1769,6 +1495,7 @@ const ChannelDetail = () => {
     () => mergeManagedChannelView(channel, managedChannels),
     [channel, managedChannels],
   )
+  const caseExamples = Array.isArray(displayChannel?.caseExamples) ? displayChannel.caseExamples : []
 
   if (isLoading) {
     return (
@@ -1853,7 +1580,44 @@ const ChannelDetail = () => {
         ))}
       </div>
 
-      <ChannelDetailAccessSection channel={displayChannel} token={token} onActionComplete={refetch} />
+      <div className="channel-detail-cta">
+        <Link className="workflow-create-cta" to={displayChannel.workflowId ? `/me/channels/new?workflowId=${encodeURIComponent(displayChannel.workflowId)}` : '/me/channels/new'}>
+          新建并部署
+        </Link>
+        <p className="channel-detail-cta-note">
+          不再提供公共“加入频道”动作。如果你想开始自己的频道，直接新建并部署会更快。
+        </p>
+      </div>
+
+      {caseExamples.length > 0 && (
+        <section id="channel-examples" className="resources">
+          <h2>频道范例</h2>
+          <p className="section-copy">这里放这个频道的代表性成片案例。列表页只看预览，进入这里可以看全文和视频地址。</p>
+          <div className="case-example-list">
+            {caseExamples.map((example) => (
+              <article key={example.id} className="case-example-card">
+                <div className="case-example-head">
+                  <div>
+                    <p className="guide-title">{example.title}</p>
+                    <p className="channel-meta">任务 ID · {example.taskId}</p>
+                    <p className="channel-meta">完成时间 · {formatDate(example.completedAt)}</p>
+                  </div>
+                  <a href={example.videoUrl} target="_blank" rel="noreferrer">打开视频</a>
+                </div>
+                <p className="case-example-preview">{example.preview}</p>
+                <details className="case-example-details">
+                  <summary>查看全文</summary>
+                  <pre className="case-example-script">{example.script}</pre>
+                </details>
+                <p className="case-example-url">
+                  <strong>视频地址：</strong>
+                  <a href={example.videoUrl} target="_blank" rel="noreferrer">{example.videoUrl}</a>
+                </p>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="resources">
         <h2>公开元数据</h2>
